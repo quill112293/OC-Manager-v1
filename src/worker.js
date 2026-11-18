@@ -27,8 +27,8 @@ const cookie=(value,age)=>'__Host-oc_session='+value+'; Path=/; Secure; HttpOnly
 async function handle(req,env){
   const url=new URL(req.url), path=url.pathname, method=req.method;
   if(path==='/oc-manager.user.js'){
-    const script=['// ==UserScript==','// @name OC Manager shortcut','// @namespace '+url.origin,'// @version 1.0.0','// @match https://www.torn.com/factions.php*','// @grant none','// ==/UserScript==',
-    '(()=>{ if(document.getElementById("oc-manager-shortcut"))return;const a=document.createElement("a");a.id="oc-manager-shortcut";a.textContent="My OC Profile";a.href='+JSON.stringify(url.origin+'/#profile')+';a.target="_blank";a.rel="noopener noreferrer";a.style.cssText="position:fixed;bottom:70px;right:12px;z-index:9999;background:#123c36;color:white;padding:8px 12px;border-radius:6px;font:14px sans-serif";document.body.append(a);})();'].join('\n');
+    const script=['// ==UserScript==','// @name OC Manager shortcut','// @namespace '+url.origin,'// @version 1.0.1','// @match https://www.torn.com/factions.php*','// @grant none','// ==/UserScript==',
+    '(()=>{ if(document.getElementById("oc-manager-shortcut"))return;const a=document.createElement("a");a.id="oc-manager-shortcut";a.textContent="My OC Profile";a.href='+JSON.stringify(url.origin+'/#profile')+';a.target="_blank";a.rel="noopener noreferrer";a.style.cssText="position:fixed;bottom:70px;right:12px;z-index:9999;background:#25617c;color:white;padding:8px 12px;border-radius:6px;font:14px sans-serif";document.body.append(a);})();'].join('\n');
     return new Response(script,{headers:{'Content-Type':'text/javascript; charset=utf-8'}});
   }
   if(!path.startsWith('/api/'))return env.ASSETS.fetch(req);

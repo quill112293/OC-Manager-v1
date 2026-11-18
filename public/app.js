@@ -1,6 +1,6 @@
 'use strict';
 const app=document.getElementById('app'),tools=document.getElementById('tools');
-let data=null, demo=false, live=false,scope='member', tab='My OCs',filter='', error='';
+let data=null, live=false,scope='member', tab='My OCs',filter='', error='';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const tct=s=>s?new Date(s*1000).toISOString().slice(11,16)+' TCT':'Unconfirmed';
 const day=s=>s?new Date(s*1000).toLocaleDateString('en-CA',{month:'short',day:'numeric',timeZone:'UTC'}):'Date unknown';
@@ -31,9 +31,8 @@ function showGate(){
         <button class="btn" type="submit">Open my profile</button>
         <a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&amp;title=OC%20Manager%20Login&amp;type=1" target="_blank" rel="noopener noreferrer">Create a Public Only key in Torn</a>
         <small>Your key verifies your faction membership and is discarded after sign-in.</small>
-      </form>`:'<p class="desc">Explore the member and staff views with sample faction records.</p>'}
+      </form>`:window.OC_OFFLINE?'<a class="btn preview-sign-in" href="https://oc-manager-v1.975y7srs57.workers.dev/">Open OC Manager to sign in</a>':'<p class="desc">Member sign-in is temporarily unavailable. Please try again shortly.</p>'}
       <p id="feedback" class="error" role="alert"></p>
-      <div class="sampleLink">${btn('Open sample profile','demo','',live?'navbtn':'btn')}</div>
     </div>
   </section>`;
   if(live) loadWelcomeBanner();
@@ -107,7 +106,7 @@ function draw(){
   const active=all.filter(r=>r.phase!=='History'&&(staff||mine(r))),history=all.filter(r=>r.phase==='History'&&(staff||mine(r)));
   const historic=tab==='OC History'||tab==='View History';
   const tabs=staff?['Active OCs','OC History',...(m.owner?['Manage staff']:[])]:['Recruiting','My OCs','View History'];
-  tools.innerHTML=(demo?'<span class="reviewLabel">Sample data</span>':'')+(m.staff?btn(staff?'My Profile':'Staff','scope',staff?'member':'staff'):'')+btn('Sign out','out');
+  tools.innerHTML=(m.staff?btn(staff?'My Profile':'Staff','scope',staff?'member':'staff'):'')+btn('Sign out','out');
   let list=[],chooser='',heading=tab;
   if(historic){
     const choices=staff?['Delayed OCs','Successful OCs']:['Delays','Successful OCs'];
@@ -134,14 +133,14 @@ function draw(){
     '<p id="feedback" class="error" role="alert" hidden></p>'+(staffPanel||'<div class="grid"><section class="stack"><div><h2>'+esc(heading)+'</h2>'+(chooser?'<div class="pills">'+chooser+'</div>':'')+'</div>'+
     (list.length?list.map((r,i)=>card(r,list.length===1&&i===0)).join(''):empty('No matching OCs in the available records.'))+'</section><aside class="panel side">'+side+'</aside></div>')+'</div>';
   if(staffPanel)drawRoster('');
-  document.getElementById('foot').textContent=(demo?'Sample snapshot':'Last successful faction check')+' · '+(data.updated?day(data.updated)+' '+tct(data.updated):'Awaiting first check')+(!demo&&data.updated&&Date.now()/1000-data.updated>600?' · Checks overdue':'');
+  document.getElementById('foot').textContent='Last successful faction check · '+(data.updated?day(data.updated)+' '+tct(data.updated):'Awaiting first check')+(data.updated&&Date.now()/1000-data.updated>600?' · Checks overdue':'');
 }
 function drawRoster(q){
   const list=data.roster.filter(x=>x.name.toLowerCase().includes(q.toLowerCase())||String(x.id).includes(q));
   document.getElementById('roster-list').innerHTML=list.map(x=>row('<b>'+esc(x.name)+'</b><br><small>#'+esc(x.id)+'</small>',x.id===data.me.id?badge('Owner'):btn(x.staff?'Remove staff':'Grant staff access','grant',x.id))).join('')||empty('No matching faction member.');
 }
 async function reloadScope(next){
-  if(!demo)data=await api('profile?scope='+next);
+  data=await api('profile?scope='+next);
   scope=next;tab=next==='staff'?'Active OCs':data.crimes.some(r=>r.phase!=='History'&&mine(r))?'My OCs':'Recruiting';filter='';draw();
 }
 document.addEventListener('input',e=>{
@@ -155,13 +154,13 @@ document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b)return;
   const {act,val}=b.dataset;
   try{
-    if(act==='demo'){demo=true;data=window.ocSample();await reloadScope('member');}
-    if(act==='out'){if(!demo)await api('logout',{});demo=false;data=null;scope='member';document.getElementById('foot').textContent='Faction operations';showGate();}
+    if(act==='out'){await api('logout',{});data=null;scope='member';document.getElementById('foot').textContent='Faction operations';showGate();}
     if(act==='scope')await reloadScope(val);
     if(act==='tab'){tab=val;filter='';draw();}
     if(act==='filter'){filter=val;draw();}
     if(act==='grant'){const person=data.roster.find(x=>x.id===Number(val));if(!person)return;const grant=!person.staff;
-      if(!demo){await api('staff',{id:person.id,grant});data=await api('profile?scope=staff');}else{person.staff=grant;}
+      await api('staff',{id:person.id,grant});
+      data=await api('profile?scope=staff');
       drawRoster(document.getElementById('member-search').value);msg((grant?'Granted staff access to ':'Removed staff access from ')+person.name+'.');}
   }catch(err){msg(err.message);}
 });
@@ -178,7 +177,6 @@ document.addEventListener('submit',async e=>{
   msg('');
   try{
     await api('login',{key});
-    demo=false;
     await reloadScope('member');
   }catch(err){
     msg(err.message);

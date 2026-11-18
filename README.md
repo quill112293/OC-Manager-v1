@@ -6,7 +6,7 @@ The welcome screen shows the configured faction’s Torn banner above the person
 
 ## Review the layout
 
-Download [review.html](./review.html) and open it in a browser, or open [the GitHub-hosted HTML preview](https://htmlpreview.github.io/?https://github.com/quill112293/OC-Manager-v1/blob/main/review.html). Choose **Open sample profile**. Sample records are fictional and the preview never asks for a key. Try **Staff → OC History → Delayed OCs → Honey Trap** for the 65-minute example. All interactions with sample records are local to the preview.
+Open [review.html](./review.html) in a browser to view the welcome layout. The sign-in link opens the deployed portal.
 
 ## Run the Worker
 
@@ -16,7 +16,7 @@ Download [review.html](./review.html) and open it in a browser, or open [the Git
 4. Deploy using `npx wrangler deploy`. The five-minute trigger starts collecting active and completed records. On a new database the first completed-crime window covers the preceding day. Historical travel and item observations begin with collection. The same database schema can read earlier oc_records rows, with missing fields shown as unverified.
 5. Open the Worker URL in any browser. A Torn script is optional. For a shortcut from Torn’s faction page, install `/oc-manager.user.js` from your own Worker URL with your userscript manager. The shortcut opens your portal and receives no keys.
 
-The member key is used only to verify identity and faction during sign-in. The Worker stores the enrolled key fingerprint, player profile and a hashed, revocable session token. The raw personal key is discarded. Member data is read through the session, staff requests are checked server-side, and membership is refreshed from Torn at most five minutes apart. To reset a member’s enrollment after key replacement, the operator removes that member’s portal sessions, staff grant and profile before trusted re-enrollment. The owner has a separately pinned key. The sample preview is independent of these sign-in and authorization paths.
+The member key is used only to verify identity and faction during sign-in. The Worker stores the enrolled key fingerprint, player profile and a hashed, revocable session token. The raw personal key is discarded. Member data is read through the session, staff requests are checked server-side, and membership is refreshed from Torn at most five minutes apart. To reset a member’s enrollment after key replacement, the operator removes that member’s portal sessions, staff grant and profile before trusted re-enrollment. The owner has a separately pinned key.
 
 ## Data in V1
 
