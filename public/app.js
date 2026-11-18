@@ -19,11 +19,47 @@ async function api(path,body){
   const j=await r.json();if(!r.ok)throw Object.assign(new Error(j.error||'Request failed.'),{status:r.status});return j;
 }
 function showGate(){
-  tools.innerHTML='<span class="mode">FACTION ACCESS</span>';
-  app.innerHTML='<section class="gate"><div class="gateIntro"><div><div class="eyebrow">Faction operations</div><h1>OC Manager</h1></div><p>Your crew, your role, and the time you need to be back in Torn.</p></div><div class="gateForm"><h2>Member sign-in</h2>'+
-    (live?'<form class="form" id="login"><label for="key">Paste your Torn API key to sign in</label><input id="key" name="key" type="password" required pattern="[A-Za-z0-9]{16}" title="Enter your 16-character Torn API key" autocomplete="off" autocapitalize="none" spellcheck="false"><button class="btn" type="submit">Open my profile</button><a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&amp;title=OC%20Manager%20Login&amp;type=1" target="_blank" rel="noopener noreferrer">Create a Public Only sign-in key in Torn</a><small>OC Manager checks your faction membership, saves a fingerprint and discards the original key.</small></form>':
-    '<p class="desc">Try the member and staff screens with sample faction records. No Torn key is needed for this review.</p>')+
-    '<div class="spaced">'+btn('Open sample profile','demo','',''+(live?'link':'btn'))+'</div><p id="feedback" class="error" role="alert"></p></div></section>';
+  tools.replaceChildren();
+  app.innerHTML=`<section class="gate" aria-labelledby="welcome-heading">
+    <div id="welcome-banner" class="welcomeBanner" ${live?'':'hidden'}></div>
+    <div class="gateForm">
+      <p id="welcome-faction" class="eyebrow" hidden></p>
+      <h1 id="welcome-heading">Welcome to OC Manager</h1>
+      ${live?`<form class="form" id="login">
+        <label for="key">Your Torn API key</label>
+        <input id="key" name="key" type="password" required pattern="[A-Za-z0-9]{16}" title="Enter your 16-character Torn API key" placeholder="Paste your 16-character key" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <button class="btn" type="submit">Open my profile</button>
+        <a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&amp;title=OC%20Manager%20Login&amp;type=1" target="_blank" rel="noopener noreferrer">Create a Public Only key in Torn</a>
+        <small>Your key verifies your faction membership and is discarded after sign-in.</small>
+      </form>`:'<p class="desc">Explore the member and staff views with sample faction records.</p>'}
+      <p id="feedback" class="error" role="alert"></p>
+      <div class="sampleLink">${btn('Open sample profile','demo','',live?'navbtn':'btn')}</div>
+    </div>
+  </section>`;
+  if(live) loadWelcomeBanner();
+}
+
+async function loadWelcomeBanner(){
+  const banner = document.getElementById('welcome-banner');
+  const name = document.getElementById('welcome-faction');
+  try {
+    const faction = await api('welcome');
+    if (faction?.name) {
+      name.textContent = faction.name;
+      name.hidden = false;
+    }
+    if (faction?.banner) {
+      const image = new Image();
+      image.alt = faction.name + ' faction banner';
+      image.onerror = () => { banner.hidden = true; };
+      banner.replaceChildren(image);
+      image.src = faction.banner;
+      return;
+    }
+  } catch {
+    // Sign-in remains available when the banner cannot be retrieved.
+  }
+  banner.hidden = true;
 }
 function buttons(items,selected,action){return items.map(x=>btn(x,action,x,'pill'+(x===selected?' sel':''))).join('');}
 function timing(r){
@@ -154,7 +190,7 @@ document.addEventListener('submit',async e=>{
 document.getElementById('brand').addEventListener('click',async e=>{e.preventDefault();if(data)try{await reloadScope('member');}catch(err){msg(err.message);}});
 (async()=>{
   if(!window.OC_OFFLINE && ['http:','https:'].includes(location.protocol)){
-    try{live=(await api('config')).live;if(live){data=await api('profile');await reloadScope('member');return;}}catch(err){if(err.status!==401)error=err.message;}
+    try{live=(await api('config')).live;if(live){await reloadScope('member');return;}}catch(err){if(err.status!==401)error=err.message;}
   }
   showGate();if(live&&error)msg(error);
 })();

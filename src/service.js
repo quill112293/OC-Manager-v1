@@ -18,6 +18,48 @@ export async function torn(key,path) {
   if(j.error)throw new HttpError([1,2,13,16].includes(j.error.code)?401:503,'Torn could not verify the request (code '+Number(j.error.code)+').');
   return j;
 }
+
+function tornBanner(image) {
+  if (typeof image !== 'string' || !image.trim()) return null;
+  try {
+    const url = new URL(image.trim(), 'https://factionimages.torn.com/');
+    const tornHost = url.hostname === 'torn.com' || url.hostname.endsWith('.torn.com');
+    if (url.protocol !== 'https:' || !tornHost || url.username || url.password || url.port) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+export async function factionWelcome(env) {
+  const id = String(env.FACTION_ID);
+  if (!/^\d+$/.test(id)) return null;
+  const cacheKey = 'welcome:' + id;
+  const db = env.DB;
+  const read = async () => {
+    const row = await db.prepare('SELECT v FROM portal_meta WHERE k=?').bind(cacheKey).first();
+    return row ? JSON.parse(row.v) : null;
+  };
+  const current = now();
+  // Reserve the next lookup across visitors. Keep the last good banner during a Torn outage.
+  const claim = await db.prepare(`INSERT INTO portal_meta(k,v) VALUES (?,?)
+    ON CONFLICT(k) DO UPDATE SET v=excluded.v WHERE CAST(portal_meta.v AS INTEGER)<=?`)
+    .bind(cacheKey + ':next', String(current + 60), current).run();
+  if (!claim.meta.changes) return read();
+  try {
+    const {basic} = await torn(env.TORN_KEY, 'faction/' + id + '/basic');
+    if (String(basic?.id) !== id || !basic.name) return read();
+    const faction = {name: basic.name, banner: tornBanner(basic.banner_image)};
+    await db.batch([
+      db.prepare('INSERT OR REPLACE INTO portal_meta(k,v) VALUES (?,?)').bind(cacheKey, JSON.stringify(faction)),
+      db.prepare('UPDATE portal_meta SET v=? WHERE k=?').bind(String(current + 3600), cacheKey + ':next')
+    ]);
+    return faction;
+  } catch {
+    return read();
+  }
+}
+
 export async function roster(env,refresh=false) {
   const db=env.DB, stamp=Number((await db.prepare("SELECT v FROM portal_meta WHERE k='rosterAt'").first())?.v||0);
   if(refresh || now()-stamp>=300){

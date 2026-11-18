@@ -1,4 +1,4 @@
-import { HttpError,identity,login,dashboard,hash,capture } from './service.js';
+import { HttpError,identity,login,dashboard,hash,capture,factionWelcome } from './service.js';
 const schema = [
   "CREATE TABLE IF NOT EXISTS oc_records (id INTEGER PRIMARY KEY, rev INTEGER NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, due_check INTEGER NOT NULL);",
   "CREATE TABLE IF NOT EXISTS portal_profiles (id INTEGER PRIMARY KEY, name TEXT NOT NULL, first_seen INTEGER NOT NULL, enrollment TEXT NOT NULL);",
@@ -36,6 +36,7 @@ async function handle(req,env){
   if(path==='/api/config')return json({live:Boolean(env.DB&&env.FACTION_ID&&env.TORN_KEY)});
   if(!env.DB||!env.FACTION_ID||!env.TORN_KEY)throw new HttpError(503,'Faction configuration is pending.');
   await initializeDatabase(env.DB);
+  if(path==='/api/welcome'&&method==='GET')return json(await factionWelcome(env));
   if(path==='/api/login'&&method==='POST'){const token=await login(req,env);return json({ok:true},200,{'Set-Cookie':cookie(token,2592000)});}
   if(path==='/api/logout'&&method==='POST'){
     const token=(req.headers.get('Cookie')||'').match(/(?:^|;\s*)__Host-oc_session=([a-f0-9]{64})(?:;|$)/)?.[1];

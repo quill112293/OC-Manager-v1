@@ -8,6 +8,36 @@ const db=new DatabaseSync(':memory:'); db.exec(readFileSync(new URL('../schema.s
 const d1={prepare(sql){const build=(args=[])=>({bind:(...a)=>build(a),first:async()=>db.prepare(sql).get(...args),all:async()=>({results:db.prepare(sql).all(...args)}),run:async()=>({meta:db.prepare(sql).run(...args)})});return build();},async batch(stmts){return Promise.all(stmts.map(s=>s.run()));}};
 const domain='https://oc.example';
 function call(env,path,{cookie,body}={}){return worker.fetch(new Request(domain+path,{method:body?'POST':'GET',headers:{Origin:domain,...(cookie?{Cookie:cookie}:{})},body:body?JSON.stringify(body):undefined}),env);}
+test('the signed-out welcome shows only the configured faction name and banner and reuses the last good result', async t => {
+  const env = {DB:d1, FACTION_ID:'123', TORN_KEY:'server-test-key'};
+  let current = 1800000000;
+  let image = 'our-banner.png';
+  let outage = false;
+  t.mock.method(Date, 'now', () => current * 1000);
+  const upstream = t.mock.method(globalThis, 'fetch', async (url, init) => {
+    assert.equal(url.pathname, '/v2/faction/123/basic');
+    assert.equal(init.headers.Authorization, 'ApiKey ' + env.TORN_KEY);
+    if (outage) throw new Error('Torn unavailable');
+    return Response.json({basic:{id:123, name:'Faction One', banner_image:image, leader_id:999}});
+  });
+  const welcome = async () => (await call(env, '/api/welcome')).json();
+  const expected = {name:'Faction One', banner:'https://factionimages.torn.com/our-banner.png'};
+  assert.deepEqual(await welcome(), expected);
+  assert.deepEqual(await welcome(), expected);
+  assert.equal(upstream.mock.callCount(), 1);
+  current += 3601;
+  outage = true;
+  assert.deepEqual(await welcome(), expected);
+  assert.deepEqual(await welcome(), expected);
+  assert.equal(upstream.mock.callCount(), 2);
+  current += 61;
+  outage = false;
+  image = 'https://factionimages.torn.com/new-banner.gif';
+  assert.deepEqual(await welcome(), {name:'Faction One', banner:image});
+  current += 3601;
+  image = '';
+  assert.deepEqual(await welcome(), {name:'Faction One', banner:null});
+});
 test('real Worker routes isolate member and staff data and revoke active sessions on removal',async()=>{
   const ownerKey='a'.repeat(16), memberKey='b'.repeat(16);
   const env={DB:d1,FACTION_ID:'50',OWNER_ID:'1',TORN_KEY:'mock',OWNER_KEY_SHA256:await hash(ownerKey)};
