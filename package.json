@@ -1,0 +1,1 @@
+{"name":"torn-faction-oc-manager","private":true,"type":"module","scripts":{"test":"node --test test/*.test.js","preview":"node scripts/review.mjs"}}
