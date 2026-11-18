@@ -11,7 +11,7 @@ Open [review.html](./review.html) in a browser to view the welcome layout. The s
 ## Run the Worker
 
 1. Use a Cloudflare D1 database for this faction. Put its ID in wrangler.jsonc, then apply the schema with `npx wrangler d1 execute oc-manager --remote --file schema.sql`. Use a separate Worker for V1 while reviewing the new portal.
-2. Set `FACTION_ID` and `OWNER_ID` to the numeric faction and owner player IDs. Set `TORN_KEY` with `npx wrangler secret put TORN_KEY` using a dedicated faction-authorized key that can read key info, faction members and faction crimes. Do not commit keys or database exports.
+2. The production configuration includes WIT-Horizon's faction ID and the owner's numeric player ID. Set `TORN_KEY` with `npx wrangler secret put TORN_KEY` using a dedicated faction-authorized key that can read key info, faction members and faction crimes. Do not commit keys or database exports.
 3. The owner signs in with a separate personal OC Manager key. To pair or replace it, enter it on the welcome screen. After Torn verifies the owner, choose **Copy fingerprint**. In the Worker's **Settings → Variables and Secrets**, set the secret `OWNER_KEY_SHA256` to this fingerprint and deploy. Sign in again with the same personal key. Members use a dedicated key that permits key/info. The site confirms current membership against the faction roster. The first valid login enrolls that key fingerprint for future logins.
 4. Deploy using `npx wrangler deploy`. The five-minute trigger starts collecting active and completed records. On a new database the first completed-crime window covers the preceding day. Historical travel and item observations begin with collection. The same database schema can read earlier oc_records rows, with missing fields shown as unverified.
 5. Open the Worker URL in any browser. A Torn script is optional. For a shortcut from Torn’s faction page, install `/oc-manager.user.js` from your own Worker URL with your userscript manager. The shortcut opens your portal and receives no keys.
@@ -19,6 +19,8 @@ Open [review.html](./review.html) in a browser to view the welcome layout. The s
 The member key is used only to verify identity and faction during sign-in. The Worker stores the enrolled key fingerprint, player profile and a hashed, revocable session token. The raw personal key is discarded. Member data is read through the session, staff requests are checked server-side, and membership is refreshed from Torn at most five minutes apart. To reset a member’s enrollment after key replacement, the operator removes that member’s portal sessions, staff grant and profile before trusted re-enrollment. The owner has a separately pinned key.
 
 ## Data in V1
+
+If the tracker secret is missing, members can still sign in and view saved records. When the five-minute roster cache expires, the next sign-in uses the member's personal key to verify the configured faction's public roster. Until that check succeeds, open sessions must verify membership again to load data. Scheduled OC collection resumes once the tracker secret is restored.
 
 Scheduled-to-executed delay is divided into per-member intervals, observed time awaiting execution and unverified time. Overlapping recorded events keep their first blocker until that blocker clears. Simultaneous causes with no established first blocker stay open for review. Snapshot intervals are estimates. The manager never attributes gaps in observations to a player.
 

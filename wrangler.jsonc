@@ -1,7 +1,7 @@
 {
   "name": "oc-manager-v1",
   "keep_vars": true,
-  "vars": {"FACTION_ID":"41363"},
+  "vars": {"FACTION_ID":"41363","OWNER_ID":"3542697"},
   "main": "src/worker.js",
   "compatibility_date": "2025-10-01",
   "assets": {"directory":"./public","binding":"ASSETS","run_worker_first":true},

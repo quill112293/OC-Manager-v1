@@ -9,15 +9,15 @@ const d1={prepare(sql){const build=(args=[])=>({bind:(...a)=>build(a),first:asyn
 const domain='https://oc.example';
 function call(env,path,{cookie,body}={}){return worker.fetch(new Request(domain+path,{method:body?'POST':'GET',headers:{Origin:domain,...(cookie?{Cookie:cookie}:{})},body:body?JSON.stringify(body):undefined}),env);}
 test('setup status names missing settings and keeps the cached faction banner available', async t => {
-  const env = {DB:d1, FACTION_ID:'456', OWNER_ID:'21'};
+  const env = {DB:d1, FACTION_ID:'456'};
   const cached = {name:'Test faction',banner:'https://factionimages.torn.com/banner.gif'};
   db.prepare('INSERT INTO portal_meta VALUES (?,?)').run('welcome:456',JSON.stringify(cached));
   const upstream = t.mock.method(globalThis,'fetch',async () => { throw new Error('unexpected upstream request'); });
   const config = async () => (await call(env,'/api/config')).json();
-  assert.deepEqual(await config(),{live:false,missing:['TORN_KEY']});
+  assert.deepEqual(await config(),{live:false,missing:['OWNER_ID']});
   assert.deepEqual(await (await call(env,'/api/welcome')).json(),cached);
   assert.equal((await call(env,'/api/profile')).status,503);
-  env.TORN_KEY='server-test-key';
+  env.OWNER_ID='21';
   assert.deepEqual(await config(),{live:true,missing:[]});
   assert.equal((await call(env,'/api/profile')).status,401);
   assert.equal(upstream.mock.callCount(),0);
@@ -161,4 +161,39 @@ test('owner sign-in accepts a replacement only after Cloudflare approves its fin
   assert.equal((await profile.json()).me.owner, true);
   await denied(original, 'owner_key_pairing');
   await denied(memberReplacement, undefined);
+});
+
+test('a personal key can verify a fresh public roster while the faction tracker is offline', async t => {
+  db.exec("DELETE FROM portal_meta WHERE k='rosterAt'; DELETE FROM portal_roster");
+  let time=1900000000, onRoster=true;
+  const key='v'.repeat(16);
+  const env={DB:d1,FACTION_ID:'1234',OWNER_ID:'91',OWNER_KEY_SHA256:await hash(key)};
+  t.mock.method(Date,'now',()=>time*1000);
+  const upstream=t.mock.method(globalThis,'fetch',async (url,init)=>{
+    assert.equal(init.headers.Authorization,'ApiKey '+key);
+    if(url.pathname==='/v2/key/info')return Response.json({info:{user:{id:91,faction_id:1234}}});
+    assert.equal(url.pathname,'/v2/faction/1234/members');
+    return Response.json({members:onRoster?[{id:91,name:'Owner'}]:[]});
+  });
+  const signIn=()=>call(env,'/api/login',{body:{key}});
+  const start=await signIn();
+  assert.equal(start.status,200);
+  const cookie=start.headers.get('Set-Cookie').split(';')[0];
+  const profile=await call(env,'/api/profile?scope=staff',{cookie});
+  assert.equal(profile.status,200);
+  const data=await profile.json();
+  assert.equal(data.me.owner,true);
+  assert.equal(data.trackingPaused,true);
+  assert.equal(upstream.mock.callCount(),2);
+  let capture;
+  worker.scheduled({},env,{waitUntil:p=>capture=p});
+  await assert.rejects(capture,/TORN_KEY/);
+  time+=301;
+  const expired=await call(env,'/api/profile',{cookie});
+  assert.equal(expired.status,401);
+  assert.equal((await expired.json()).code,'membership_recheck');
+  assert.equal(upstream.mock.callCount(),2);
+  onRoster=false;
+  assert.equal((await signIn()).status,403);
+  assert.equal((await call(env,'/api/profile',{cookie})).status,403);
 });

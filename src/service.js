@@ -76,11 +76,15 @@ export async function factionWelcome(env) {
   }
 }
 
-export async function roster(env,refresh=false) {
+export async function roster(env,{refresh=false,signInKey}={}) {
   const db=env.DB, stamp=Number((await db.prepare("SELECT v FROM portal_meta WHERE k='rosterAt'").first())?.v||0);
   if(refresh || now()-stamp>=300){
     const snapshot=now();
-    const {members}=await torn(env.TORN_KEY,'faction/members');
+    const trackerKey=env.TORN_KEY?.trim();
+    if(!trackerKey && !signInKey)throw new HttpError(401,'Sign in again so Torn can confirm your current faction membership.','membership_recheck');
+    const {members}=trackerKey
+      ? await torn(trackerKey,'faction/members')
+      : await torn(signInKey,'faction/'+encodeURIComponent(env.FACTION_ID)+'/members');
     if(!Array.isArray(members)||members.some(m=>!Number.isInteger(m.id)||!m.name))throw new HttpError(503,'Faction roster unavailable.');
     const rows=[db.prepare(`INSERT INTO portal_roster SELECT json_extract(value,'$.id'),json_extract(value,'$.name'),? FROM json_each(?) WHERE true
       ON CONFLICT(id) DO UPDATE SET name=excluded.name,checked=excluded.checked WHERE excluded.checked>=checked`).bind(snapshot,JSON.stringify(members.map(m=>({id:m.id,name:m.name}))))];
@@ -109,12 +113,12 @@ export async function login(req,env) {
   const {info}=await torn(key,'key/info');
   const id=info?.user?.id;
   if(!Number.isSafeInteger(id)||String(info.user.faction_id)!==String(env.FACTION_ID))throw new HttpError(403,'This site is for current faction members.');
-  const members=await roster(env);
+  const members=await roster(env,{signInKey:key});
   const m=members.find(m=>m.id===id);
   if(!m)throw new HttpError(403,'Your player ID is absent from the current faction roster.');
   const digest=await hash(key), token=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
   const owner=String(id)===String(env.OWNER_ID).trim();
-  if(owner && key===env.TORN_KEY.trim())throw new HttpError(403,'This is the faction tracker key. Use your separate personal owner sign-in key.');
+  if(owner && key===env.TORN_KEY?.trim())throw new HttpError(403,'This is the faction tracker key. Use your separate personal owner sign-in key.');
   if(owner && !ownerPinMatches(env,digest)){
     throw new HttpError(403,'Torn verified your owner account. Use the personal key paired with OC Manager, or pair this key below.','owner_key_pairing');
   }
@@ -152,9 +156,10 @@ async function saveCrimes(env,crimes,rosterMap,stamp) {
   }
 }
 export async function capture(env) {
+  if(!env.TORN_KEY?.trim())throw new Error('OC tracking requires the TORN_KEY secret.');
   const stamp=now(), {info}=await torn(env.TORN_KEY,'key/info');
   if(!env.FACTION_ID||String(info?.user?.faction_id)!==String(env.FACTION_ID))throw new Error('Faction configuration mismatch.');
-  const members=new Map((await roster(env,true)).map(m=>[m.id,m]));
+  const members=new Map((await roster(env,{refresh:true})).map(m=>[m.id,m]));
   const completedThrough=Number((await env.DB.prepare("SELECT v FROM portal_meta WHERE k='completedThrough'").first())?.v) || stamp-86400;
   const end=Math.min(stamp,completedThrough+86400);
   for(const type of ['available','completed']){
@@ -185,5 +190,5 @@ export async function dashboard(env,me,scope) {
     if(scope==='staff'||mine(r))return r;
     return {...r,participants:[],blockers:[],spans:[],pauses:[],slots:r.slots.map(s=>({...s,member:s.member?'filled':null,cpr:null}))};
   }),roster:me.owner&&scope==='staff'?me.members.map(m=>({id:m.id,name:m.name,staff:grants.includes(m.id)})):[],
-    updated:Number((await env.DB.prepare("SELECT v FROM portal_meta WHERE k='lastSuccess'").first())?.v)||0};
+    trackingPaused:!env.TORN_KEY?.trim(),updated:Number((await env.DB.prepare("SELECT v FROM portal_meta WHERE k='lastSuccess'").first())?.v)||0};
 }

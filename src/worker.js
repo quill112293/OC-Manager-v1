@@ -38,7 +38,7 @@ async function handle(req,env){
     await initializeDatabase(env.DB);
     return json(await factionWelcome(env));
   }
-  const missing = ['DB','FACTION_ID','TORN_KEY','OWNER_ID'].filter(name => !env[name] || (typeof env[name]==='string' && !env[name].trim()));
+  const missing = ['DB','FACTION_ID','OWNER_ID'].filter(name => !env[name] || (typeof env[name]==='string' && !env[name].trim()));
   if(path==='/api/config')return json({live:missing.length===0,missing});
   if(missing.length)throw new HttpError(503,'Cloudflare is missing '+missing.join(', ')+'.');
   await initializeDatabase(env.DB);
