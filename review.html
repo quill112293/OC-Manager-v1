@@ -48,7 +48,7 @@ async function api(path,body){
 function showGate(){
   tools.innerHTML='<span class="mode">FACTION ACCESS</span>';
   app.innerHTML='<section class="gate"><div class="gateIntro"><div><div class="eyebrow">Faction operations</div><h1>OC Manager</h1></div><p>Your crew, your role, and the time you need to be back in Torn.</p></div><div class="gateForm"><h2>Member sign-in</h2>'+
-    (live?'<form class="form" id="login"><label for="key">Torn API key</label><input id="key" name="key" type="password" required minlength="16" maxlength="16" autocomplete="off"><button class="btn">Open my profile</button><a href="https://www.torn.com/preferences.php#tab=api" target="_blank" rel="noopener noreferrer">Create a dedicated key in Torn</a><small>Your key verifies faction membership. The site stores a verifier and a session, not the raw key.</small></form>':
+    (live?'<form class="form" id="login"><label for="key">Paste your Torn API key to sign in</label><input id="key" name="key" type="password" required pattern="[A-Za-z0-9]{16}" title="Enter your 16-character Torn API key" autocomplete="off" autocapitalize="none" spellcheck="false"><button class="btn" type="submit">Open my profile</button><a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&amp;title=OC%20Manager%20Login&amp;type=1" target="_blank" rel="noopener noreferrer">Create a Public Only sign-in key in Torn</a><small>OC Manager checks your faction membership, saves a fingerprint and discards the original key.</small></form>':
     '<p class="desc">Try the member and staff screens with sample faction records. No Torn key is needed for this review.</p>')+
     '<div class="spaced">'+btn('Open sample profile','demo','',''+(live?'link':'btn'))+'</div><p id="feedback" class="error" role="alert"></p></div></section>';
 }
@@ -135,7 +135,13 @@ async function reloadScope(next){
   if(!demo)data=await api('profile?scope='+next);
   scope=next;tab=next==='staff'?'Active OCs':data.crimes.some(r=>r.phase!=='History'&&mine(r))?'My OCs':'Recruiting';filter='';draw();
 }
-document.addEventListener('input',e=>{if(e.target.id==='member-search')drawRoster(e.target.value);});
+document.addEventListener('input',e=>{
+  const input=e.target;
+  if(input.id==='member-search')drawRoster(input.value);
+  if(input.form?.id!=='login'||input.name!=='key'||e.inputType!=='insertFromPaste')return;
+  input.value=input.value.trim();
+  if(input.validity.valid)input.form.requestSubmit();
+});
 document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b)return;
   const {act,val}=b.dataset;
@@ -151,8 +157,26 @@ document.addEventListener('click',async e=>{
   }catch(err){msg(err.message);}
 });
 document.addEventListener('submit',async e=>{
-  if(e.target.id!=='login')return;e.preventDefault();const input=e.target.elements.key, key=input.value.trim();input.value='';
-  try{await api('login',{key});demo=false;data=await api('profile');await reloadScope('member');}catch(err){msg(err.message);}
+  const form=e.target;
+  if(form.id!=='login')return;
+  e.preventDefault();
+  const input=form.elements.key, button=form.querySelector('[type="submit"]');
+  if(button.disabled)return;
+  const key=input.value.trim();
+  input.value='';
+  input.disabled=button.disabled=true;
+  button.textContent='Signing in…';
+  msg('');
+  try{
+    await api('login',{key});
+    demo=false;
+    await reloadScope('member');
+  }catch(err){
+    msg(err.message);
+    input.disabled=button.disabled=false;
+    button.textContent='Open my profile';
+    input.focus();
+  }
 });
 document.getElementById('brand').addEventListener('click',async e=>{e.preventDefault();if(data)try{await reloadScope('member');}catch(err){msg(err.message);}});
 (async()=>{
