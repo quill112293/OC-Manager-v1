@@ -98,7 +98,7 @@ function draw(){
     '<p id="feedback" class="error" role="alert" hidden></p>'+(staffPanel||'<div class="grid"><section class="stack"><div><h2>'+esc(heading)+'</h2>'+(chooser?'<div class="pills">'+chooser+'</div>':'')+'</div>'+
     (list.length?list.map((r,i)=>card(r,list.length===1&&i===0)).join(''):empty('No matching OCs in the available records.'))+'</section><aside class="panel side">'+side+'</aside></div>')+'</div>';
   if(staffPanel)drawRoster('');
-  document.getElementById('foot').textContent=(demo?'Sample snapshot':'Last OC observation')+' · '+(data.updated?day(data.updated)+' '+tct(data.updated):'Awaiting first check');
+  document.getElementById('foot').textContent=(demo?'Sample snapshot':'Last successful faction check')+' · '+(data.updated?day(data.updated)+' '+tct(data.updated):'Awaiting first check')+(!demo&&data.updated&&Date.now()/1000-data.updated>600?' · Checks overdue':'');
 }
 function drawRoster(q){
   const list=data.roster.filter(x=>x.name.toLowerCase().includes(q.toLowerCase())||String(x.id).includes(q));

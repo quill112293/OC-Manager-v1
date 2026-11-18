@@ -24,7 +24,8 @@ export async function roster(env,refresh=false) {
     const snapshot=now();
     const {members}=await torn(env.TORN_KEY,'faction/members');
     if(!Array.isArray(members)||members.some(m=>!Number.isInteger(m.id)||!m.name))throw new HttpError(503,'Faction roster unavailable.');
-    const rows=members.map(m=>db.prepare('INSERT INTO portal_roster VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,checked=excluded.checked WHERE excluded.checked>=checked').bind(m.id,m.name,snapshot));
+    const rows=[db.prepare(`INSERT INTO portal_roster SELECT json_extract(value,'$.id'),json_extract(value,'$.name'),? FROM json_each(?) WHERE true
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,checked=excluded.checked WHERE excluded.checked>=checked`).bind(snapshot,JSON.stringify(members.map(m=>({id:m.id,name:m.name}))))];
     await db.batch([...rows,db.prepare('DELETE FROM portal_roster WHERE checked<?').bind(snapshot),
       db.prepare("INSERT INTO portal_meta VALUES ('rosterAt',?) ON CONFLICT(k) DO UPDATE SET v=MAX(CAST(v AS INTEGER),CAST(excluded.v AS INTEGER))").bind(String(snapshot))]);
     return members;
@@ -64,17 +65,28 @@ export async function login(req,env) {
   ]);
   return token;
 }
-async function saveCrime(env,c,rosterMap,stamp) {
-  for(let n=0;n<3;n++){
-    const old=await env.DB.prepare('SELECT rev,body FROM oc_records WHERE id=?').bind(c.id).first();
-    const r=old?JSON.parse(old.body):startRecord(c);
-    if(r.last>=stamp || (['Successful','Failure','Expired'].includes(r.status) && r.status===c.status && r.executed===c.executed_at))return;
-    observe(r,c,rosterMap,new Map(),stamp);
-    const w=await env.DB.prepare('INSERT INTO oc_records VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET rev=excluded.rev,body=excluded.body,status=excluded.status,due_check=excluded.due_check WHERE oc_records.rev=?')
-      .bind(c.id,(old?.rev||0)+1,JSON.stringify(r),r.status,r.nextCheck||0,old?.rev||0).run();
-    if(w.meta.changes)return;
+async function saveCrimes(env,crimes,rosterMap,stamp) {
+  // Batch a page of records into two database calls, leaving room for Torn requests.
+  for(let offset=0;offset<crimes.length;offset+=25){
+    const group=crimes.slice(offset,offset+25), ids=group.map(c=>c.id);
+    for(let attempt=0;attempt<3;attempt++){
+      const prior=(await env.DB.prepare('SELECT id,rev,body FROM oc_records WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all()).results;
+      const old=new Map(prior.map(r=>[r.id,r])), write=[];
+      for(const c of group){
+        const stored=old.get(c.id), r=stored?JSON.parse(stored.body):startRecord(c);
+        if(r.last>=stamp || (['Successful','Failure','Expired'].includes(r.status) && r.status===c.status && r.executed===c.executed_at))continue;
+        observe(r,c,rosterMap,new Map(),stamp);
+        write.push({id:c.id,rev:(stored?.rev||0)+1,r,status:r.status,due:r.nextCheck||0});
+      }
+      if(!write.length)break;
+      const result=await env.DB.prepare(`INSERT INTO oc_records (id,rev,body,status,due_check)
+        SELECT json_extract(value,'$.id'),json_extract(value,'$.rev'),json_extract(value,'$.r'),json_extract(value,'$.status'),json_extract(value,'$.due')
+        FROM json_each(?) WHERE true ON CONFLICT(id) DO UPDATE SET
+        rev=excluded.rev,body=excluded.body,status=excluded.status,due_check=excluded.due_check WHERE oc_records.rev=excluded.rev-1`).bind(JSON.stringify(write)).run();
+      if(result.meta.changes===write.length)break;
+      if(attempt===2)throw new Error('Concurrent update; retry on the next poll.');
+    }
   }
-  throw new Error('Concurrent update; retry on the next poll.');
 }
 export async function capture(env) {
   const stamp=now(), {info}=await torn(env.TORN_KEY,'key/info');
@@ -88,7 +100,7 @@ export async function capture(env) {
     for(;;){
       const {crimes}=await torn(env.TORN_KEY,'faction/crimes?cat='+type+'&sort=ASC&limit=100&offset='+offset+query);
       if(!Array.isArray(crimes))throw new Error('Unexpected OC response.');
-      for(const c of crimes)await saveCrime(env,c,members,stamp);
+      await saveCrimes(env,crimes,members,stamp);
       if(crimes.length<100)break;
       offset+=100;
       if(offset>=2000)throw new Error('Too many OCs in a single window.');
@@ -96,6 +108,7 @@ export async function capture(env) {
   }
   await env.DB.batch([
     env.DB.prepare("INSERT INTO portal_meta VALUES ('completedThrough',?) ON CONFLICT(k) DO UPDATE SET v=MAX(CAST(v AS INTEGER),CAST(excluded.v AS INTEGER))").bind(String(end)),
+    env.DB.prepare("INSERT INTO portal_meta VALUES ('lastSuccess',?) ON CONFLICT(k) DO UPDATE SET v=MAX(CAST(v AS INTEGER),CAST(excluded.v AS INTEGER))").bind(String(stamp)),
     env.DB.prepare('DELETE FROM portal_sessions WHERE expires<=?').bind(stamp)
   ]);
 }
@@ -109,5 +122,5 @@ export async function dashboard(env,me,scope) {
     if(scope==='staff'||mine(r))return r;
     return {...r,participants:[],blockers:[],spans:[],pauses:[],slots:r.slots.map(s=>({...s,member:s.member?'filled':null,cpr:null}))};
   }),roster:me.owner&&scope==='staff'?me.members.map(m=>({id:m.id,name:m.name,staff:grants.includes(m.id)})):[],
-    updated:Math.max(0,...records.map(r=>r.updated||0))};
+    updated:Number((await env.DB.prepare("SELECT v FROM portal_meta WHERE k='lastSuccess'").first())?.v)||0};
 }

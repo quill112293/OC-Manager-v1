@@ -38,5 +38,6 @@ export function present(r) {
   return {id:r.id,name:r.name,level:r.level??null,phase:phase(r,r.last),status:r.status,
     ready:r.ready,executed:r.executed,updated:r.last,participants:r.participants||[],
     slots:r.slots||[],spans:timeline(r),pauses:r.planningPauses||[],
+    events:Object.entries(r.blocks||{}).flatMap(([,b])=>b.runs.map(s=>({at:s.start,label:b.name+' observed · '+s.reason}))).sort((a,b)=>a.at-b.at),
     blockers:Object.entries(r.blocks||{}).map(([id,b])=>({id:Number(id),name:b.name,reasons:[...new Set(b.runs.map(x=>x.reason))]}))};
 }
