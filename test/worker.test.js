@@ -3,11 +3,20 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import worker from '../src/worker.js';
-import { hash } from '../src/service.js';
+import { hash, torn } from '../src/service.js';
 const db=new DatabaseSync(':memory:'); db.exec(readFileSync(new URL('../schema.sql',import.meta.url),'utf8'));
 const d1={prepare(sql){const build=(args=[])=>({bind:(...a)=>build(a),first:async()=>db.prepare(sql).get(...args),all:async()=>({results:db.prepare(sql).all(...args)}),run:async()=>({meta:db.prepare(sql).run(...args)})});return build();},async batch(stmts){return Promise.all(stmts.map(s=>s.run()));}};
 const domain='https://oc.example';
 function call(env,path,{cookie,body}={}){return worker.fetch(new Request(domain+path,{method:body?'POST':'GET',headers:{Origin:domain,...(cookie?{Cookie:cookie}:{})},body:body?JSON.stringify(body):undefined}),env);}
+test('Torn requests use the Workers redirect mode and reject a redirect before reading data', async t => {
+  const upstream = t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url.origin, 'https://api.torn.com');
+    assert.equal(options.redirect, 'manual');
+    return Response.redirect('https://elsewhere.invalid/', 302);
+  });
+  await assert.rejects(torn('test-key','faction/basic'), {status:503});
+  assert.equal(upstream.mock.callCount(), 1);
+});
 test('the signed-out welcome shows only the configured faction name and banner and reuses the last good result', async t => {
   const env = {DB:d1, FACTION_ID:'123', TORN_KEY:'server-test-key'};
   let current = 1800000000;

@@ -12,7 +12,7 @@ export class HttpError extends Error {
 export async function torn(key,path) {
   const url=new URL('https://api.torn.com/v2/'+path);
   url.searchParams.set('comment','OCManagerV1');
-  const r=await fetch(url,{headers:{Authorization:'ApiKey '+key},redirect:'error',signal:AbortSignal.timeout(10000)});
+  const r=await fetch(url,{headers:{Authorization:'ApiKey '+key},redirect:'manual',signal:AbortSignal.timeout(10000)});
   if(!r.ok)throw new HttpError(503,'Torn is unavailable. Try again shortly.');
   const j=await r.json();
   if(j.error)throw new HttpError([1,2,13,16].includes(j.error.code)?401:503,'Torn could not verify the request (code '+Number(j.error.code)+').');
