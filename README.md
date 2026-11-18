@@ -2,7 +2,7 @@
 
 A standalone, mobile-friendly Torn faction portal. Members use one personal key to open My Profile. Recruiting, My OCs and View History are the member tabs. Approved staff can browse faction-wide active OCs and OC History. Both history screens have delay and success filters. A delayed success appears under both filters.
 
-The welcome screen shows the configured faction’s Torn banner above the personal key field. The Worker reads the faction name and banner from Torn’s public `faction/{id}/basic` selection using the server key and refreshes them hourly when visitors open the welcome screen. If using a custom server key, include this selection. Sign-in is available while the artwork loads.
+The welcome screen shows the configured faction’s Torn banner above the personal key field. The Worker reads the faction name and banner from Torn’s public `faction/basic` selection using the server key, verifies the faction ID, and refreshes them hourly when visitors open the welcome screen. If using a custom server key, include this selection. Sign-in is available while the artwork loads.
 
 ## Review the layout
 

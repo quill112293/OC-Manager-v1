@@ -15,7 +15,7 @@ test('the signed-out welcome shows only the configured faction name and banner a
   let outage = false;
   t.mock.method(Date, 'now', () => current * 1000);
   const upstream = t.mock.method(globalThis, 'fetch', async (url, init) => {
-    assert.equal(url.pathname, '/v2/faction/123/basic');
+    assert.equal(url.pathname, '/v2/faction/basic');
     assert.equal(init.headers.Authorization, 'ApiKey ' + env.TORN_KEY);
     if (outage) throw new Error('Torn unavailable');
     return Response.json({basic:{id:123, name:'Faction One', banner_image:image, leader_id:999}});
@@ -37,6 +37,22 @@ test('the signed-out welcome shows only the configured faction name and banner a
   current += 3601;
   image = '';
   assert.deepEqual(await welcome(), {name:'Faction One', banner:null});
+});
+test('welcome explains a cold-start lookup failure and recovers on the next retry', async t => {
+  const env = {DB:d1, FACTION_ID:' 124 ', TORN_KEY:' server-key '};
+  let time = 1800000000;
+  let denying = true;
+  t.mock.method(Date, 'now', () => time * 1000);
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    assert.equal(init.headers.Authorization, 'ApiKey server-key');
+    return Response.json(denying ? {error:{code:16}} : {basic:{id:124,name:'Our Crew',banner_image:'crew.gif'}});
+  });
+  const welcome = async () => (await call(env, '/api/welcome')).json();
+  assert.match((await welcome()).error, /code 16/);
+  assert.match((await welcome()).error, /code 16/);
+  denying = false;
+  time += 61;
+  assert.deepEqual(await welcome(), {name:'Our Crew',banner:'https://factionimages.torn.com/crew.gif'});
 });
 test('real Worker routes isolate member and staff data and revoke active sessions on removal',async()=>{
   const ownerKey='a'.repeat(16), memberKey='b'.repeat(16);

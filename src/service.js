@@ -32,13 +32,23 @@ function tornBanner(image) {
 }
 
 export async function factionWelcome(env) {
-  const id = String(env.FACTION_ID);
-  if (!/^\d+$/.test(id)) return null;
+  const id = String(env.FACTION_ID).trim();
+  if (!/^\d+$/.test(id)) return {error:'The configured faction ID is invalid.'};
   const cacheKey = 'welcome:' + id;
   const db = env.DB;
   const read = async () => {
     const row = await db.prepare('SELECT v FROM portal_meta WHERE k=?').bind(cacheKey).first();
     return row ? JSON.parse(row.v) : null;
+  };
+  const missing = async error => {
+    // Preserve a previously verified public profile while the upstream service is unavailable.
+    const previous = await read();
+    if (previous?.name) return previous;
+    const unavailable = {error};
+    await db.prepare(`INSERT INTO portal_meta(k,v) VALUES (?,?) ON CONFLICT(k) DO UPDATE
+      SET v=excluded.v WHERE json_extract(portal_meta.v,'$.name') IS NULL`)
+      .bind(cacheKey, JSON.stringify(unavailable)).run();
+    return (await read()) || unavailable;
   };
   const current = now();
   // Reserve the next lookup across visitors. Keep the last good banner during a Torn outage.
@@ -47,16 +57,16 @@ export async function factionWelcome(env) {
     .bind(cacheKey + ':next', String(current + 60), current).run();
   if (!claim.meta.changes) return read();
   try {
-    const {basic} = await torn(env.TORN_KEY, 'faction/' + id + '/basic');
-    if (String(basic?.id) !== id || !basic.name) return read();
+    const {basic} = await torn(env.TORN_KEY.trim(), 'faction/basic');
+    if (String(basic?.id) !== id || !basic.name) return missing('Torn did not return the configured faction.');
     const faction = {name: basic.name, banner: tornBanner(basic.banner_image)};
     await db.batch([
       db.prepare('INSERT OR REPLACE INTO portal_meta(k,v) VALUES (?,?)').bind(cacheKey, JSON.stringify(faction)),
       db.prepare('UPDATE portal_meta SET v=? WHERE k=?').bind(String(current + 3600), cacheKey + ':next')
     ]);
     return faction;
-  } catch {
-    return read();
+  } catch (err) {
+    return missing(err instanceof HttpError ? err.message : 'The faction banner lookup is temporarily unavailable.');
   }
 }
 
