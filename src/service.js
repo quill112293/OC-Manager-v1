@@ -45,6 +45,7 @@ export async function factionWelcome(env) {
     const row = await db.prepare('SELECT v FROM portal_meta WHERE k=?').bind(cacheKey).first();
     return row ? JSON.parse(row.v) : null;
   };
+  if(!env.TORN_KEY?.trim())return (await read()) || {error:'The faction banner is temporarily unavailable.'};
   const missing = async error => {
     // Preserve a previously verified public profile while the upstream service is unavailable.
     const previous = await read();

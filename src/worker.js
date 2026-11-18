@@ -33,10 +33,15 @@ async function handle(req,env){
   }
   if(!path.startsWith('/api/'))return env.ASSETS.fetch(req);
   if(method!=='GET'&&req.headers.get('Origin')!==url.origin)throw new HttpError(403,'Invalid request origin.');
-  if(path==='/api/config')return json({live:Boolean(env.DB&&env.FACTION_ID&&env.TORN_KEY)});
-  if(!env.DB||!env.FACTION_ID||!env.TORN_KEY)throw new HttpError(503,'Faction configuration is pending.');
+  if(path==='/api/welcome'&&method==='GET'){
+    if(!env.DB||!env.FACTION_ID)throw new HttpError(503,'Faction banner configuration is pending.');
+    await initializeDatabase(env.DB);
+    return json(await factionWelcome(env));
+  }
+  const missing = ['DB','FACTION_ID','TORN_KEY','OWNER_ID'].filter(name => !env[name] || (typeof env[name]==='string' && !env[name].trim()));
+  if(path==='/api/config')return json({live:missing.length===0,missing});
+  if(missing.length)throw new HttpError(503,'Cloudflare is missing '+missing.join(', ')+'.');
   await initializeDatabase(env.DB);
-  if(path==='/api/welcome'&&method==='GET')return json(await factionWelcome(env));
   if(path==='/api/login'&&method==='POST'){const token=await login(req,env);return json({ok:true},200,{'Set-Cookie':cookie(token,2592000)});}
   if(path==='/api/logout'&&method==='POST'){
     const token=(req.headers.get('Cookie')||'').match(/(?:^|;\s*)__Host-oc_session=([a-f0-9]{64})(?:;|$)/)?.[1];

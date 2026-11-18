@@ -8,6 +8,20 @@ const db=new DatabaseSync(':memory:'); db.exec(readFileSync(new URL('../schema.s
 const d1={prepare(sql){const build=(args=[])=>({bind:(...a)=>build(a),first:async()=>db.prepare(sql).get(...args),all:async()=>({results:db.prepare(sql).all(...args)}),run:async()=>({meta:db.prepare(sql).run(...args)})});return build();},async batch(stmts){return Promise.all(stmts.map(s=>s.run()));}};
 const domain='https://oc.example';
 function call(env,path,{cookie,body}={}){return worker.fetch(new Request(domain+path,{method:body?'POST':'GET',headers:{Origin:domain,...(cookie?{Cookie:cookie}:{})},body:body?JSON.stringify(body):undefined}),env);}
+test('setup status names missing settings and keeps the cached faction banner available', async t => {
+  const env = {DB:d1, FACTION_ID:'456', OWNER_ID:'21'};
+  const cached = {name:'Test faction',banner:'https://factionimages.torn.com/banner.gif'};
+  db.prepare('INSERT INTO portal_meta VALUES (?,?)').run('welcome:456',JSON.stringify(cached));
+  const upstream = t.mock.method(globalThis,'fetch',async () => { throw new Error('unexpected upstream request'); });
+  const config = async () => (await call(env,'/api/config')).json();
+  assert.deepEqual(await config(),{live:false,missing:['TORN_KEY']});
+  assert.deepEqual(await (await call(env,'/api/welcome')).json(),cached);
+  assert.equal((await call(env,'/api/profile')).status,503);
+  env.TORN_KEY='server-test-key';
+  assert.deepEqual(await config(),{live:true,missing:[]});
+  assert.equal((await call(env,'/api/profile')).status,401);
+  assert.equal(upstream.mock.callCount(),0);
+});
 test('Torn requests use the Workers redirect mode and reject a redirect before reading data', async t => {
   const upstream = t.mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(url.origin, 'https://api.torn.com');

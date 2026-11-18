@@ -21,7 +21,7 @@ async function api(path,body){
 function showGate(){
   tools.replaceChildren();
   app.innerHTML=`<section class="gate" aria-labelledby="welcome-heading">
-    <div id="welcome-banner" class="welcomeBanner" ${live?'':'hidden'}></div>
+    <div id="welcome-banner" class="welcomeBanner" ${window.OC_OFFLINE?'hidden':''}></div>
     <div class="gateForm">
       <p id="welcome-faction" class="eyebrow" hidden></p>
       <h1 id="welcome-heading">Welcome to OC Manager</h1>
@@ -31,7 +31,7 @@ function showGate(){
         <button class="btn" type="submit">Open my profile</button>
         <a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&amp;title=OC%20Manager%20Login&amp;type=1" target="_blank" rel="noopener noreferrer">Create a Public Only key in Torn</a>
         <small>Your key verifies your faction membership and is discarded after sign-in.</small>
-      </form>`:window.OC_OFFLINE?'<a class="btn preview-sign-in" href="https://oc-manager-v1.975y7srs57.workers.dev/">Open OC Manager to sign in</a>':'<p class="desc">Member sign-in is temporarily unavailable. Please try again shortly.</p>'}
+      </form>`:window.OC_OFFLINE?'<a class="btn preview-sign-in" href="https://oc-manager-v1.975y7srs57.workers.dev/">Open OC Manager to sign in</a>':'<p class="desc">Member sign-in is temporarily unavailable.</p><button class="link tight" data-act="retry">Check again</button>'}
       <p id="feedback" class="error" role="alert"></p>
       <section id="owner-pairing" class="ownerPairing" aria-labelledby="pair-heading" hidden>
         <h2 id="pair-heading">Pair this owner key</h2>
@@ -47,7 +47,7 @@ function showGate(){
       </section>
     </div>
   </section>`;
-  if(live) loadWelcomeBanner();
+  if(!window.OC_OFFLINE)loadWelcomeBanner();
 }
 
 async function showOwnerPairing(key) {
@@ -173,6 +173,7 @@ document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b)return;
   const {act,val}=b.dataset;
   try{
+    if(act==='retry'){b.disabled=true;await openPortal();return;}
     if(act==='copy-fingerprint'){
       const field=document.getElementById('owner-fingerprint');
       const status=document.getElementById('copy-status');
@@ -226,9 +227,16 @@ document.addEventListener('submit',async e=>{
   }
 });
 document.getElementById('brand').addEventListener('click',async e=>{e.preventDefault();if(data)try{await reloadScope('member');}catch(err){msg(err.message);}});
-(async()=>{
+async function openPortal(){
+  error='';
   if(!window.OC_OFFLINE && ['http:','https:'].includes(location.protocol)){
-    try{live=(await api('config')).live;if(live){await reloadScope('member');return;}}catch(err){if(err.status!==401)error=err.message;}
+    try{
+      const config=await api('config');
+      live=config.live;
+      if(live){await reloadScope('member');return;}
+      if(config.missing?.length)error='The site owner needs to restore '+config.missing.join(', ')+' in Cloudflare.';
+    }catch(err){if(err.status!==401)error=err.message;}
   }
-  showGate();if(live&&error)msg(error);
-})();
+  showGate();if(error)msg(error);
+}
+openPortal();
