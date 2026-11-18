@@ -56,6 +56,12 @@ async function handle(req,env){
   throw new HttpError(404,'Page unavailable.');
 }
 export default {
-  async fetch(req,env){try{return await handle(req,env);}catch(err){return json({error:err instanceof HttpError?err.message:'The manager is unavailable. Try again after checking the Worker configuration.'},err instanceof HttpError?err.status:503);}},
+  async fetch(req,env){
+    try{return await handle(req,env);}
+    catch(err){
+      if(err instanceof HttpError)return json({error:err.message,code:err.code},err.status);
+      return json({error:'The manager is unavailable. Try again after checking the Worker configuration.'},503);
+    }
+  },
   scheduled(event,env,ctx){ctx.waitUntil(initializeDatabase(env.DB).then(()=>capture(env)));}
 };

@@ -36,5 +36,11 @@
 .gateForm .form { margin-top: 24px; }
 .gateForm .form a { color: var(--blue); text-underline-offset: 3px; }
 .gateForm .error:not(:empty) { margin-top: 14px; }
+.ownerPairing:not([hidden]) { display: grid; gap: 8px; margin-top: 16px; padding: 16px; background: var(--pale); border-radius: 8px; }
+.ownerPairing input { min-width: 0; width: 100%; padding: 8px; font: 16px ui-monospace, monospace; border: 1px solid var(--control-line); border-radius: 4px; }
+.ownerPairing button { justify-self: start; min-height: 44px; }
+.ownerPairing small:empty { display: none; }
+.ownerPairing ol { margin: 4px 0 0; padding-left: 1.35em; }
+.ownerPairing li + li { margin-top: 6px; }
 .preview-sign-in { margin-top: 20px; }
 header :focus-visible, .side :focus-visible { outline-color: var(--ice); }

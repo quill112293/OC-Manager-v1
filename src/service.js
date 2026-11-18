@@ -7,7 +7,12 @@ export async function hash(s) {
   return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
 }
 export class HttpError extends Error {
-  constructor(status,message) {super(message);this.status=status;}
+  constructor(status,message,code) {super(message);this.status=status;this.code=code;}
+}
+
+function ownerPinMatches(env, digest) {
+  const pin = String(env.OWNER_KEY_SHA256 || '').trim().toLowerCase();
+  return /^[0-9a-f]{64}$/.test(pin) && digest === pin;
 }
 export async function torn(key,path) {
   const url=new URL('https://api.torn.com/v2/'+path);
@@ -89,10 +94,11 @@ export async function identity(req,env) {
   if(!token)throw new HttpError(401,'Sign in with your Torn key.');
   const row=await env.DB.prepare('SELECT * FROM portal_sessions WHERE digest=? AND expires>?').bind(await hash(token),now()).first();
   if(!row)throw new HttpError(401,'Your session has ended.');
+  const owner=String(row.member)===String(env.OWNER_ID).trim();
+  if(owner && !ownerPinMatches(env,row.key_hash))throw new HttpError(401,'Sign in with your current owner key.');
   const members=await roster(env);
   const me=members.find(m=>m.id===row.member);
   if(!me){await env.DB.prepare('DELETE FROM portal_sessions WHERE member=?').bind(row.member).run();throw new HttpError(403,'Current faction membership is required.');}
-  const owner=String(me.id)===String(env.OWNER_ID) && row.key_hash===env.OWNER_KEY_SHA256;
   const staff=await env.DB.prepare('SELECT key_hash FROM portal_staff WHERE id=?').bind(me.id).first();
   return {id:me.id,name:me.name,owner,staff:owner||staff?.key_hash===row.key_hash,members,keyHash:row.key_hash,token};
 }
@@ -106,15 +112,19 @@ export async function login(req,env) {
   const m=members.find(m=>m.id===id);
   if(!m)throw new HttpError(403,'Your player ID is absent from the current faction roster.');
   const digest=await hash(key), token=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
-  if(String(id)===String(env.OWNER_ID) && env.OWNER_KEY_SHA256 && digest!==env.OWNER_KEY_SHA256)
-    throw new HttpError(403,'Use the dedicated owner key for this manager.');
-  const enrollment=await env.DB.prepare('SELECT enrollment FROM portal_profiles WHERE id=?').bind(id).first();
-  if(enrollment && enrollment.enrollment!==digest)throw new HttpError(403,'Use your enrolled OC Manager key, or ask the owner to reset enrollment.');
-  await env.DB.batch([
-    env.DB.prepare('INSERT INTO portal_profiles VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name').bind(id,m.name,now(),digest),
+  const owner=String(id)===String(env.OWNER_ID).trim();
+  if(owner && key===env.TORN_KEY.trim())throw new HttpError(403,'This is the faction tracker key. Use your separate personal owner sign-in key.');
+  if(owner && !ownerPinMatches(env,digest)){
+    throw new HttpError(403,'Torn verified your owner account. Use the personal key paired with OC Manager, or pair this key below.','owner_key_pairing');
+  }
+  const [,session]=await env.DB.batch([
+    env.DB.prepare(`INSERT INTO portal_profiles VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE
+      SET name=excluded.name, enrollment=excluded.enrollment
+      WHERE portal_profiles.enrollment=excluded.enrollment OR ?=1`).bind(id,m.name,now(),digest,Number(owner)),
     env.DB.prepare('INSERT INTO portal_sessions SELECT ?,id,enrollment,? FROM portal_profiles WHERE id=? AND enrollment=?').bind(await hash(token),now()+2592000,id,digest),
     env.DB.prepare('UPDATE portal_staff SET key_hash=? WHERE id=? AND key_hash IS NULL AND EXISTS (SELECT 1 FROM portal_profiles WHERE id=? AND enrollment=?)').bind(digest,id,id,digest)
   ]);
+  if(session.meta.changes!==1)throw new HttpError(403,'Use your enrolled OC Manager key, or ask the owner to reset enrollment.');
   return token;
 }
 async function saveCrimes(env,crimes,rosterMap,stamp) {

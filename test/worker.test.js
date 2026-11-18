@@ -106,3 +106,45 @@ test('the scheduled trigger records member history without any website session a
     assert.equal(Number(db.prepare("SELECT v FROM portal_meta WHERE k='lastSuccess'").get().v),base+600);
   }finally{globalThis.fetch=origin;Date.now=clock;}
 });
+
+test('owner sign-in accepts a replacement only after Cloudflare approves its fingerprint', async t => {
+  db.exec("DELETE FROM portal_meta WHERE k='rosterAt'; DELETE FROM portal_roster");
+  const original = 'o'.repeat(16), replacement = 'r'.repeat(16), tracker = 't'.repeat(16);
+  const memberKey = 'm'.repeat(16), memberReplacement = 'n'.repeat(16);
+  const env = {DB:d1, FACTION_ID:'77', OWNER_ID:'10', TORN_KEY:tracker};
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url.pathname === '/v2/faction/members') return Response.json({members:[{id:10,name:'Owner'},{id:11,name:'Member'}]});
+    assert.equal(url.pathname, '/v2/key/info');
+    const key = init.headers.Authorization.slice('ApiKey '.length);
+    return Response.json({info:{user:{id:[memberKey,memberReplacement].includes(key) ? 11 : 10, faction_id:77}}});
+  });
+  const signIn = key => call(env, '/api/login', {body:{key}});
+  async function session(key) {
+    const result = await signIn(key);
+    assert.equal(result.status, 200);
+    return result.headers.get('Set-Cookie').split(';')[0];
+  }
+  async function denied(key, expectedCode) {
+    const result = await signIn(key);
+    assert.equal(result.status, 403);
+    assert.equal(result.headers.get('Set-Cookie'), null);
+    assert.equal((await result.json()).code, expectedCode);
+  }
+  await denied(original, 'owner_key_pairing');
+  env.OWNER_KEY_SHA256 = '  ' + (await hash(original)).toUpperCase() + '\n';
+  const first = await session(original);
+  assert.equal((await call(env, '/api/profile?scope=staff', {cookie:first})).status, 200);
+  await denied(replacement, 'owner_key_pairing');
+  await session(memberKey);
+  await denied(memberReplacement, undefined);
+  env.OWNER_KEY_SHA256 = await hash(tracker);
+  await denied(tracker, undefined);
+  env.OWNER_KEY_SHA256 = await hash(replacement);
+  assert.equal((await call(env, '/api/profile', {cookie:first})).status, 401);
+  const next = await session(replacement);
+  const profile = await call(env, '/api/profile?scope=staff', {cookie:next});
+  assert.equal(profile.status, 200);
+  assert.equal((await profile.json()).me.owner, true);
+  await denied(original, 'owner_key_pairing');
+  await denied(memberReplacement, undefined);
+});

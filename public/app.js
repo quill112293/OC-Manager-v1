@@ -16,7 +16,7 @@ const msg=e=>{const el=document.getElementById('feedback');if(el){el.textContent
 async function api(path,body){
   const r=await fetch('/api/'+path,{method:body?'POST':'GET',credentials:'same-origin',
     headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
-  const j=await r.json();if(!r.ok)throw Object.assign(new Error(j.error||'Request failed.'),{status:r.status});return j;
+  const j=await r.json();if(!r.ok)throw Object.assign(new Error(j.error||'Request failed.'),{status:r.status,code:j.code});return j;
 }
 function showGate(){
   tools.replaceChildren();
@@ -33,9 +33,28 @@ function showGate(){
         <small>Your key verifies your faction membership and is discarded after sign-in.</small>
       </form>`:window.OC_OFFLINE?'<a class="btn preview-sign-in" href="https://oc-manager-v1.975y7srs57.workers.dev/">Open OC Manager to sign in</a>':'<p class="desc">Member sign-in is temporarily unavailable. Please try again shortly.</p>'}
       <p id="feedback" class="error" role="alert"></p>
+      <section id="owner-pairing" class="ownerPairing" aria-labelledby="pair-heading" hidden>
+        <h2 id="pair-heading">Pair this owner key</h2>
+        <label for="owner-fingerprint">Fingerprint for Cloudflare</label>
+        <input id="owner-fingerprint" type="text" readonly spellcheck="false">
+        <button class="link" type="button" data-act="copy-fingerprint">Copy fingerprint</button>
+        <small id="copy-status" role="status"></small>
+        <ol>
+          <li>In Cloudflare, open <strong>oc-manager-v1 → Settings → Variables and Secrets</strong>.</li>
+          <li>Set <code>OWNER_KEY_SHA256</code> to the copied fingerprint and tap <strong>Deploy</strong>.</li>
+          <li>Return here and sign in with the same 16-character Torn key.</li>
+        </ol>
+      </section>
     </div>
   </section>`;
   if(live) loadWelcomeBanner();
+}
+
+async function showOwnerPairing(key) {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
+  const fingerprint = Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
+  document.getElementById('owner-fingerprint').value = fingerprint;
+  document.getElementById('owner-pairing').hidden = false;
 }
 
 async function loadWelcomeBanner(){
@@ -154,6 +173,19 @@ document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b)return;
   const {act,val}=b.dataset;
   try{
+    if(act==='copy-fingerprint'){
+      const field=document.getElementById('owner-fingerprint');
+      const status=document.getElementById('copy-status');
+      try {
+        await navigator.clipboard.writeText(field.value);
+        status.textContent='Fingerprint copied.';
+      } catch {
+        field.focus();
+        field.select();
+        field.setSelectionRange(0,field.value.length);
+        status.textContent='The fingerprint is selected. Tap Copy.';
+      }
+    }
     if(act==='out'){await api('logout',{});data=null;scope='member';document.getElementById('foot').textContent='Faction operations';showGate();}
     if(act==='scope')await reloadScope(val);
     if(act==='tab'){tab=val;filter='';draw();}
@@ -174,15 +206,23 @@ document.addEventListener('submit',async e=>{
   input.value='';
   input.disabled=button.disabled=true;
   button.textContent='Signing in…';
+  document.getElementById('owner-pairing').hidden=true;
+  document.getElementById('owner-fingerprint').value='';
+  document.getElementById('copy-status').textContent='';
   msg('');
   try{
     await api('login',{key});
     await reloadScope('member');
   }catch(err){
     msg(err.message);
+    if(err.code==='owner_key_pairing'){
+      try { await showOwnerPairing(key); }
+      catch { msg('Torn verified your owner account. Open this page in Safari or Chrome to copy the fingerprint for your replacement key.'); }
+    }
     input.disabled=button.disabled=false;
     button.textContent='Open my profile';
-    input.focus();
+    if(document.getElementById('owner-pairing').hidden)input.focus();
+    else document.querySelector('[data-act="copy-fingerprint"]').focus();
   }
 });
 document.getElementById('brand').addEventListener('click',async e=>{e.preventDefault();if(data)try{await reloadScope('member');}catch(err){msg(err.message);}});
