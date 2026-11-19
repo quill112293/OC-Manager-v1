@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS oc_records (id INTEGER PRIMARY KEY, rev INTEGER NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, due_check INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS portal_profiles (id INTEGER PRIMARY KEY, name TEXT NOT NULL, first_seen INTEGER NOT NULL, enrollment TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS portal_visits (member INTEGER PRIMARY KEY REFERENCES portal_profiles(id) ON DELETE CASCADE, last_opened INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS portal_sessions (digest TEXT PRIMARY KEY, member INTEGER NOT NULL, key_hash TEXT NOT NULL, expires INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS portal_session_expiry ON portal_sessions(expires);
 CREATE TABLE IF NOT EXISTS portal_staff (id INTEGER PRIMARY KEY, key_hash TEXT);

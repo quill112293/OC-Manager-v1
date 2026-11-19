@@ -46,6 +46,9 @@
 .ownerPairing ol { margin: 4px 0 0; padding-left: 1.35em; }
 .ownerPairing li + li { margin-top: 6px; }
 .preview-sign-in { margin-top: 20px; }
+.usage-list { list-style: none; margin: 0; padding: 0; }
+.usage-list li { padding: 12px 0; overflow-wrap: anywhere; }
+.usage-list li + li { border-top: 1px solid var(--line); }
 header :focus-visible, .side :focus-visible { outline-color: var(--ice); }
 </style></head><body>
 <header><div class="frame head"><a href="#profile" id="brand" aria-label="OC Manager home"><span class="mark" aria-hidden="true">◈</span> OC Manager</a><div class="utilities" id="tools"></div></div></header>
@@ -183,7 +186,9 @@ function draw(){
   const all=staff?data.crimes:data.crimes.filter(r=>mine(r)||r.phase==='Recruiting');
   const active=all.filter(r=>r.phase!=='History'&&(staff||mine(r))),history=all.filter(r=>r.phase==='History'&&(staff||mine(r)));
   const historic=tab==='OC History'||tab==='View History';
-  const tabs=staff?['Active OCs','OC History',...(m.owner?['Manage staff']:[])]:['Recruiting','My OCs','View History'];
+  const tabs=staff?['Active OCs','OC History']:['Recruiting','My OCs','View History'];
+  if(m.owner)tabs.splice(1,0,'Members');
+  if(staff && m.owner)tabs.push('Manage staff');
   tools.innerHTML=(m.staff?btn(staff?'My Profile':'Staff','scope',staff?'member':'staff'):'')+btn('Sign out','out');
   let list=[],chooser='',heading=tab;
   if(historic){
@@ -202,6 +207,7 @@ function draw(){
   const panels='<div class="summary">'+tile(active.length,'Active OCs')+tile(history.filter(r=>r.status==='Successful').length,'Successful OCs')+
     tile(history.filter(r=>delayed(r)&&(staff||r.blockers.some(b=>b.id===m.id))).length,'Delay records')+'</div>';
   let staffPanel='';
+  if(tab==='Members' && m.owner)staffPanel='<section class="panel stack" id="member-usage"><h2>Members</h2><p role="status">Loading member sign-ins…</p></section>';
   if(tab==='Manage staff') staffPanel='<div class="panel stack"><h2>Manage staff</h2><label for="member-search">Search faction roster</label><input class="search" id="member-search" placeholder="Name or Torn ID"><div id="roster-list"></div></div>';
   const headingText=staff?'Staff panel':'My Profile';
   const side=historic?'<div class="eyebrow">History</div><h2>Delay records</h2><p class="desc">Open a crime to see the roster, each recorded cause, and time awaiting execution.</p>':
@@ -210,8 +216,39 @@ function draw(){
     panels+'<nav class="tabs" aria-label="Profile tabs">'+tabs.map(t=>btn(t,'tab',t,t===tab?'sel':'')).join('')+'</nav>'+
     '<p id="feedback" class="error" role="alert" hidden></p>'+(staffPanel||'<div class="grid"><section class="stack"><div><h2>'+esc(heading)+'</h2>'+(chooser?'<div class="pills">'+chooser+'</div>':'')+'</div>'+
     (list.length?list.map((r,i)=>card(r,list.length===1&&i===0)).join(''):empty('No matching OCs in the available records.'))+'</section><aside class="panel side">'+side+'</aside></div>')+'</div>';
-  if(staffPanel)drawRoster('');
+  if(tab==='Manage staff')drawRoster('');
+  if(tab==='Members' && m.owner)loadMemberUsage(document.getElementById('member-usage'));
   document.getElementById('foot').textContent=(data.trackingPaused?'OC tracking paused · ':'')+'Last successful faction check · '+(data.updated?day(data.updated)+' '+tct(data.updated):'Awaiting first check')+(data.updated&&Date.now()/1000-data.updated>600?' · Checks overdue':'');
+}
+async function loadMemberUsage(panel){
+  const status=panel.querySelector('[role="status"]');
+  try {
+    const {total,members}=await api('members');
+    if(!panel.isConnected)return;
+    status.textContent=members.length+' of '+total+' current faction members have signed in.';
+    if(!members.length)return;
+    panel.insertAdjacentHTML('beforeend','<label for="usage-search">Search by name or Torn ID</label><input class="search" type="search" id="usage-search"><ul class="usage-list"></ul>');
+    const search=panel.querySelector('input');
+    const list=panel.querySelector('ul');
+    const dates=new Intl.DateTimeFormat('en-GB',{
+      timeZone:'UTC',day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'
+    });
+    const formatDate=stamp=>dates.format(stamp*1000)+' TCT';
+    function renderList(){
+      const q=search.value.trim().toLowerCase().replace(/^#/,'');
+      const visible=members.filter(member=>member.name.toLowerCase().includes(q)||String(member.id).includes(q));
+      list.innerHTML=visible.map(member=>{
+        const last=member.lastOpened?formatDate(member.lastOpened):'No visit recorded yet';
+        return '<li><strong>'+esc(member.name)+'</strong> <small>#'+esc(member.id)+'</small>'+
+          '<br><small>First sign-in · '+esc(formatDate(member.firstSignIn))+'</small>'+
+          '<br><small>Last opened · '+esc(last)+'</small></li>';
+      }).join('')||'<li>No matching members.</li>';
+    }
+    search.addEventListener('input',renderList);
+    renderList();
+  } catch(err) {
+    if(panel.isConnected)status.textContent=err.message;
+  }
 }
 function drawRoster(q){
   const list=data.roster.filter(x=>x.name.toLowerCase().includes(q.toLowerCase())||String(x.id).includes(q));

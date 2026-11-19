@@ -43,4 +43,7 @@
 .ownerPairing ol { margin: 4px 0 0; padding-left: 1.35em; }
 .ownerPairing li + li { margin-top: 6px; }
 .preview-sign-in { margin-top: 20px; }
+.usage-list { list-style: none; margin: 0; padding: 0; }
+.usage-list li { padding: 12px 0; overflow-wrap: anywhere; }
+.usage-list li + li { border-top: 1px solid var(--line); }
 header :focus-visible, .side :focus-visible { outline-color: var(--ice); }

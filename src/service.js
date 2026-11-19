@@ -180,6 +180,16 @@ export async function capture(env) {
     env.DB.prepare('DELETE FROM portal_sessions WHERE expires<=?').bind(stamp)
   ]);
 }
+export async function memberUsage(env,me) {
+  if(!me.owner)throw new HttpError(403,'Only the owner can view member usage.');
+  const names = new Map(me.members.map(member => [member.id,member.name]));
+  const {results} = await env.DB.prepare(`SELECT p.id, p.first_seen AS firstSignIn, v.last_opened AS lastOpened
+    FROM portal_profiles p LEFT JOIN portal_visits v ON v.member=p.id
+    WHERE p.id IN (SELECT value FROM json_each(?))
+    ORDER BY COALESCE(v.last_opened,p.first_seen) DESC, p.id`).bind(JSON.stringify([...names.keys()])).all();
+  return {total:names.size,members:results.map(member => ({...member,name:names.get(member.id)}))};
+}
+
 export async function dashboard(env,me,scope) {
   if(scope==='staff'&&!me.staff)throw new HttpError(403,'Staff access required.');
   const records=(await env.DB.prepare('SELECT body FROM oc_records ORDER BY id DESC').all()).results.map(x=>present(JSON.parse(x.body)));

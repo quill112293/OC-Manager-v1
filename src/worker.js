@@ -1,7 +1,8 @@
-import { HttpError,identity,login,dashboard,hash,capture,factionWelcome } from './service.js';
+import { HttpError,identity,login,dashboard,hash,capture,factionWelcome,memberUsage,now } from './service.js';
 const schema = [
   "CREATE TABLE IF NOT EXISTS oc_records (id INTEGER PRIMARY KEY, rev INTEGER NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, due_check INTEGER NOT NULL);",
   "CREATE TABLE IF NOT EXISTS portal_profiles (id INTEGER PRIMARY KEY, name TEXT NOT NULL, first_seen INTEGER NOT NULL, enrollment TEXT NOT NULL);",
+  "CREATE TABLE IF NOT EXISTS portal_visits (member INTEGER PRIMARY KEY REFERENCES portal_profiles(id) ON DELETE CASCADE, last_opened INTEGER NOT NULL);",
   "CREATE TABLE IF NOT EXISTS portal_sessions (digest TEXT PRIMARY KEY, member INTEGER NOT NULL, key_hash TEXT NOT NULL, expires INTEGER NOT NULL);",
   "CREATE INDEX IF NOT EXISTS portal_session_expiry ON portal_sessions(expires);",
   "CREATE TABLE IF NOT EXISTS portal_staff (id INTEGER PRIMARY KEY, key_hash TEXT);",
@@ -49,7 +50,14 @@ async function handle(req,env){
     return json({ok:true},200,{'Set-Cookie':cookie('',0)});
   }
   const me=await identity(req,env);
-  if(path==='/api/profile'&&method==='GET')return json(await dashboard(env,me,url.searchParams.get('scope')));
+  if(path==='/api/members'&&method==='GET')return json(await memberUsage(env,me));
+  if(path==='/api/profile'&&method==='GET'){
+    const response = json(await dashboard(env,me,url.searchParams.get('scope')));
+    await env.DB.prepare(`INSERT INTO portal_visits (member,last_opened) SELECT id,? FROM portal_profiles WHERE id=?
+      ON CONFLICT(member) DO UPDATE SET last_opened=excluded.last_opened WHERE excluded.last_opened>portal_visits.last_opened`)
+      .bind(now(),me.id).run().catch(()=>console.warn('Unable to record a profile visit.'));
+    return response;
+  }
   if(path==='/api/staff'&&method==='POST'){
     if(!me.owner)throw new HttpError(403,'Only the owner can manage staff.');
     const {id,grant}=await req.json();

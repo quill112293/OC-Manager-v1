@@ -197,3 +197,39 @@ test('a personal key can verify a fresh public roster while the faction tracker 
   assert.equal((await signIn()).status,403);
   assert.equal((await call(env,'/api/profile',{cookie})).status,403);
 });
+
+test('only the owner can list current members who have signed in, including earlier enrollments', async t => {
+  let time = 1910000000;
+  t.mock.method(Date,'now',()=>time*1000);
+  const ownerKey = 'x'.repeat(16), memberKey = 'y'.repeat(16);
+  const env = {DB:d1,FACTION_ID:'914',OWNER_ID:'901',TORN_KEY:'tracker',OWNER_KEY_SHA256:await hash(ownerKey)};
+  db.exec("DELETE FROM portal_meta WHERE k='rosterAt'; DELETE FROM portal_roster");
+  const members = [{id:901,name:'Owner'},{id:902,name:'Staff'},{id:903,name:'Renamed'},{id:904,name:'Never signed in'}];
+  t.mock.method(globalThis,'fetch',async (url,init) => {
+    if(url.pathname==='/v2/faction/members')return Response.json({members});
+    assert.equal(url.pathname,'/v2/key/info');
+    return Response.json({info:{user:{id:init.headers.Authorization==='ApiKey '+ownerKey?901:902,faction_id:914}}});
+  });
+  const enroll = db.prepare('INSERT INTO portal_profiles VALUES (?,?,?,?)');
+  enroll.run(903,'Old name',time-100,'old-test-enrollment');
+  enroll.run(905,'Left faction',time-100,'other-test-enrollment');
+  const signIn = async key => (await call(env,'/api/login',{body:{key}})).headers.get('Set-Cookie').split(';')[0];
+  const owner = await signIn(ownerKey), member = await signIn(memberKey);
+  const listing = cookie => call(env,'/api/members',{cookie});
+  assert.equal((await listing()).status,401);
+  assert.equal((await listing(member)).status,403);
+  assert.equal((await call(env,'/api/staff',{cookie:owner,body:{id:902,grant:true}})).status,200);
+  assert.equal((await listing(member)).status,403);
+  const first = time;
+  time+=60;
+  assert.equal((await call(env,'/api/profile',{cookie:member})).status,200);
+  time+=60;
+  assert.equal((await call(env,'/api/profile?scope=staff',{cookie:member})).status,200);
+  const response = await listing(owner);
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{total:4,members:[
+    {id:902,name:'Staff',firstSignIn:first,lastOpened:time},
+    {id:901,name:'Owner',firstSignIn:first,lastOpened:null},
+    {id:903,name:'Renamed',firstSignIn:first-100,lastOpened:null}
+  ]});
+});
