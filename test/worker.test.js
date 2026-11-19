@@ -233,3 +233,44 @@ test('only the owner can list current members who have signed in, including earl
     {id:903,name:'Renamed',firstSignIn:first-100,lastOpened:null}
   ]});
 });
+
+test('remembering this browser is optional, editable, and revoked by sign-out', async t => {
+  let time=1920000000;
+  t.mock.method(Date,'now',()=>time*1000);
+  db.exec("DELETE FROM portal_meta WHERE k='rosterAt'; DELETE FROM portal_roster");
+  const env={DB:d1,FACTION_ID:'75',OWNER_ID:'900',TORN_KEY:'tracker'};
+  t.mock.method(globalThis,'fetch',async url=>Response.json(url.pathname.endsWith('/key/info')
+    ? {info:{user:{id:906,faction_id:75}}} : {members:[{id:906,name:'Member'}]}));
+  const key='k'.repeat(16);
+  const login=async rememberDevice=>call(env,'/api/login',{body:{key,rememberDevice}});
+  const setCookie=r=>r.headers.get('Set-Cookie');
+  const header=r=>setCookie(r).split(';')[0];
+  const change=(cookie,rememberDevice)=>call(env,'/api/device',{cookie,body:{rememberDevice}});
+  const initial=await login(false),otherBrowser=await login(true);
+  assert.equal(initial.status,200);
+  assert.doesNotMatch(setCookie(initial),/Max-Age|Expires/i);
+  assert.match(setCookie(otherBrowser),/Max-Age=34560000/);
+  const profile=async cookie=>(await call(env,'/api/profile',{cookie})).json();
+  assert.equal((await profile(header(initial))).rememberDevice,false);
+  time+=12;
+  const remembered=await change(header(initial),true);
+  assert.match(setCookie(remembered),/Max-Age=34560000/);
+  assert.equal((await profile(header(remembered))).rememberDevice,true);
+  time+=50*86400;
+  const reopened=await call(env,'/api/profile',{cookie:header(remembered)});
+  assert.equal(reopened.status,200);
+  assert.match(setCookie(reopened),/Max-Age=34560000/);
+  delete env.TORN_KEY;
+  time+=301;
+  const pending=await call(env,'/api/profile',{cookie:header(remembered)});
+  assert.equal((await pending.json()).code,'membership_pending');
+  env.TORN_KEY='tracker';
+  assert.equal((await profile(header(remembered))).rememberDevice,true);
+  const temporary=await change(header(remembered),false);
+  assert.doesNotMatch(setCookie(temporary),/Max-Age|Expires/i);
+  assert.equal((await change(header(temporary),'yes')).status,400);
+  const out=await call(env,'/api/logout',{cookie:header(temporary),body:{}});
+  assert.match(setCookie(out),/Max-Age=0/);
+  assert.equal((await call(env,'/api/profile',{cookie:header(remembered)})).status,401);
+  assert.equal((await profile(header(otherBrowser))).rememberDevice,true);
+});

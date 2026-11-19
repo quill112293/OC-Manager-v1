@@ -18,21 +18,27 @@ async function api(path,body){
     headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
   const j=await r.json();
   if(!r.ok){
-    if(j.code==='membership_recheck' && data){
-      data=null;scope='member';document.getElementById('foot').textContent='Faction operations';showGate();
+    if(j.code==='membership_pending' || (j.code==='membership_recheck' && data)){
+      data=null;scope='member';document.getElementById('foot').textContent='Faction operations';showGate(j.code==='membership_pending');
     }
     throw Object.assign(new Error(j.error||'Request failed.'),{status:r.status,code:j.code});
   }
   return j;
 }
-function showGate(){
-  tools.replaceChildren();
+let savingDevice=false;
+function deviceSetting(checked=false){
+  return '<label class="device-choice"><input type="checkbox" name="rememberDevice"'+(checked?' checked':'')+(savingDevice?' disabled':'')+'> Remember this device</label>';
+}
+function showGate(pending=false){
+  tools.innerHTML=pending?btn('Sign out','out'):'';
   app.innerHTML=`<section class="gate" aria-labelledby="welcome-heading">
     <div id="welcome-banner" class="welcomeBanner" ${window.OC_OFFLINE?'hidden':''}></div>
     <div class="gateForm">
       <p id="welcome-faction" class="eyebrow" hidden></p>
-      <h1 id="welcome-heading">Welcome to OC Manager</h1>
+      <h1 id="welcome-heading">${pending?'Verify faction membership':'Welcome to OC Manager'}</h1>
+      ${pending?'<p class="desc">Your device is still signed in. Retry the roster check or use your Torn key to verify membership now.</p><button type="button" class="link tight" data-act="retry">Retry roster check</button>':''}
       ${live?`<form class="form" id="login">
+        ${deviceSetting(pending)}
         <label for="key">Your Torn API key</label>
         <input id="key" name="key" type="password" required pattern="[A-Za-z0-9]{16}" title="Enter your 16-character Torn API key" placeholder="Paste your 16-character key" autocomplete="off" autocapitalize="none" spellcheck="false">
         <button class="btn" type="submit">Open my profile</button>
@@ -158,7 +164,7 @@ function draw(){
   const side=historic?'<div class="eyebrow">History</div><h2>Delay records</h2><p class="desc">Open a crime to see the roster, each recorded cause, and time awaiting execution.</p>':
     '<div class="eyebrow">Faction policy</div><h2>Entry requirements</h2>'+row('Levels 1–2','Unrestricted')+row('Level 3+ CPR','60 minimum')+row('Level 3+ weight','7% maximum');
   app.innerHTML='<div class="screen"><div class="hero line"><div><div class="eyebrow">Faction operations</div><h1>'+headingText+'</h1></div><div class="person"><span class="avatar">'+esc(m.name.slice(0,1))+'</span><span><b>'+esc(m.name)+'</b><br><small>'+esc(m.owner?'Owner':m.staff?'Staff':'Member')+' · #'+esc(m.id)+'</small></span></div></div>'+
-    panels+'<nav class="tabs" aria-label="Profile tabs">'+tabs.map(t=>btn(t,'tab',t,t===tab?'sel':'')).join('')+'</nav>'+
+    deviceSetting(data.rememberDevice)+panels+'<nav class="tabs" aria-label="Profile tabs">'+tabs.map(t=>btn(t,'tab',t,t===tab?'sel':'')).join('')+'</nav>'+
     '<p id="feedback" class="error" role="alert" hidden></p>'+(staffPanel||'<div class="grid"><section class="stack"><div><h2>'+esc(heading)+'</h2>'+(chooser?'<div class="pills">'+chooser+'</div>':'')+'</div>'+
     (list.length?list.map((r,i)=>card(r,list.length===1&&i===0)).join(''):empty('No matching OCs in the available records.'))+'</section><aside class="panel side">'+side+'</aside></div>')+'</div>';
   if(tab==='Manage staff')drawRoster('');
@@ -210,6 +216,21 @@ document.addEventListener('input',e=>{
   input.value=input.value.trim();
   if(input.validity.valid)input.form.requestSubmit();
 });
+document.addEventListener('change',async e=>{
+  const input=e.target;
+  if(input.name!=='rememberDevice'||input.form||!data||savingDevice)return;
+  const id=data.me.id;
+  savingDevice=input.disabled=true;
+  try {
+    const result=await api('device',{rememberDevice:input.checked});
+    if(data?.me.id===id)data.rememberDevice=result.rememberDevice;
+  } catch(err){msg(err.message);}
+  finally {
+    savingDevice=false;
+    const current=app.querySelector('input[name="rememberDevice"]');
+    if(current){current.disabled=false;if(data)current.checked=data.rememberDevice;}
+  }
+});
 document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b)return;
   const {act,val}=b.dataset;
@@ -253,7 +274,7 @@ document.addEventListener('submit',async e=>{
   document.getElementById('copy-status').textContent='';
   msg('');
   try{
-    await api('login',{key});
+    await api('login',{key,rememberDevice:form.elements.rememberDevice.checked});
     await reloadScope('member');
   }catch(err){
     msg(err.message);
@@ -276,7 +297,7 @@ async function openPortal(){
       live=config.live;
       if(live){await reloadScope('member');return;}
       if(config.missing?.length)error='The site owner needs to restore '+config.missing.join(', ')+' in Cloudflare.';
-    }catch(err){if(err.status!==401||err.code==='membership_recheck')error=err.message;}
+    }catch(err){if(err.code==='membership_pending')return;if(err.status!==401||err.code==='membership_recheck')error=err.message;}
   }
   showGate();if(error)msg(error);
 }

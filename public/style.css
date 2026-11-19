@@ -47,3 +47,6 @@
 .usage-list li { padding: 12px 0; overflow-wrap: anywhere; }
 .usage-list li + li { border-top: 1px solid var(--line); }
 header :focus-visible, .side :focus-visible { outline-color: var(--ice); }
+
+.device-choice { display: inline-flex; align-items: center; gap: 9px; min-height: 44px; width: fit-content; cursor: pointer; }
+.device-choice input[type="checkbox"] { width: 20px; height: 20px; margin: 0; padding: 0; accent-color: var(--blue); }

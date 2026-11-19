@@ -1,4 +1,4 @@
-import { HttpError,identity,login,dashboard,hash,capture,factionWelcome,memberUsage,now } from './service.js';
+import { HttpError,identity,login,dashboard,hash,capture,factionWelcome,memberUsage,now,sessionToken,sessionExpiry,SESSION_SECONDS } from './service.js';
 const schema = [
   "CREATE TABLE IF NOT EXISTS oc_records (id INTEGER PRIMARY KEY, rev INTEGER NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, due_check INTEGER NOT NULL);",
   "CREATE TABLE IF NOT EXISTS portal_profiles (id INTEGER PRIMARY KEY, name TEXT NOT NULL, first_seen INTEGER NOT NULL, enrollment TEXT NOT NULL);",
@@ -24,7 +24,11 @@ function initializeDatabase(db) {
 }
 
 const json=(v,status=200,headers={})=>Response.json(v,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
-const cookie=(value,age)=>'__Host-oc_session='+value+'; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age='+age;
+const cookie=(value,age)=>'__Host-oc_session='+value+'; Path=/; Secure; HttpOnly; SameSite=Strict'+(age==null?'':'; Max-Age='+age);
+function deviceCookie(token,rememberDevice){
+  // Renew the persistent browser cookie whenever the saved device opens its profile.
+  return cookie(token,rememberDevice?400*24*60*60:null);
+}
 async function handle(req,env){
   const url=new URL(req.url), path=url.pathname, method=req.method;
   if(path==='/oc-manager.user.js'){
@@ -43,16 +47,27 @@ async function handle(req,env){
   if(path==='/api/config')return json({live:missing.length===0,missing});
   if(missing.length)throw new HttpError(503,'Cloudflare is missing '+missing.join(', ')+'.');
   await initializeDatabase(env.DB);
-  if(path==='/api/login'&&method==='POST'){const token=await login(req,env);return json({ok:true},200,{'Set-Cookie':cookie(token,2592000)});}
+  if(path==='/api/login'&&method==='POST'){
+    const {token,rememberDevice}=await login(req,env);
+    return json({ok:true},200,{'Set-Cookie':rememberDevice===undefined?cookie(token,SESSION_SECONDS):deviceCookie(token,rememberDevice)});
+  }
   if(path==='/api/logout'&&method==='POST'){
-    const token=(req.headers.get('Cookie')||'').match(/(?:^|;\s*)__Host-oc_session=([a-f0-9]{64})(?:;|$)/)?.[1];
+    const token=sessionToken(req);
     if(token)await env.DB.prepare('DELETE FROM portal_sessions WHERE digest=?').bind(await hash(token)).run();
     return json({ok:true},200,{'Set-Cookie':cookie('',0)});
   }
   const me=await identity(req,env);
+  if(path==='/api/device'&&method==='POST'){
+    const {rememberDevice}=await req.json();
+    if(typeof rememberDevice!=='boolean')throw new HttpError(400,'Choose a device preference.');
+    const saved=await env.DB.prepare('UPDATE portal_sessions SET expires=? WHERE digest=? AND (expires=0 OR expires>?)')
+      .bind(sessionExpiry(rememberDevice),await hash(me.token),now()).run();
+    if(!saved.meta.changes)throw new HttpError(401,'Your session has ended.');
+    return json({rememberDevice},200,{'Set-Cookie':deviceCookie(me.token,rememberDevice)});
+  }
   if(path==='/api/members'&&method==='GET')return json(await memberUsage(env,me));
   if(path==='/api/profile'&&method==='GET'){
-    const response = json(await dashboard(env,me,url.searchParams.get('scope')));
+    const response = json(await dashboard(env,me,url.searchParams.get('scope')),200,me.rememberDevice?{'Set-Cookie':deviceCookie(me.token,true)}:{});
     await env.DB.prepare(`INSERT INTO portal_visits (member,last_opened) SELECT id,? FROM portal_profiles WHERE id=?
       ON CONFLICT(member) DO UPDATE SET last_opened=excluded.last_opened WHERE excluded.last_opened>portal_visits.last_opened`)
       .bind(now(),me.id).run().catch(()=>console.warn('Unable to record a profile visit.'));

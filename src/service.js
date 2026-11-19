@@ -94,21 +94,34 @@ export async function roster(env,{refresh=false,signInKey}={}) {
   }
   return (await db.prepare('SELECT id,name FROM portal_roster ORDER BY name').all()).results;
 }
+export const SESSION_SECONDS=30*24*60*60;
+// Zero is the persisted marker for a remembered session with no server-side deadline.
+export const sessionExpiry=remember=>remember===true?0:now()+SESSION_SECONDS;
+export function sessionToken(req) {
+  return (req.headers.get('Cookie')||'').match(/(?:^|;\s*)__Host-oc_session=([a-f0-9]{64})(?:;|$)/)?.[1];
+}
 export async function identity(req,env) {
-  const token=(req.headers.get('Cookie')||'').match(/(?:^|;\s*)__Host-oc_session=([a-f0-9]{64})(?:;|$)/)?.[1];
+  const token=sessionToken(req);
   if(!token)throw new HttpError(401,'Sign in with your Torn key.');
-  const row=await env.DB.prepare('SELECT * FROM portal_sessions WHERE digest=? AND expires>?').bind(await hash(token),now()).first();
+  const row=await env.DB.prepare('SELECT * FROM portal_sessions WHERE digest=? AND (expires=0 OR expires>?)').bind(await hash(token),now()).first();
   if(!row)throw new HttpError(401,'Your session has ended.');
   const owner=String(row.member)===String(env.OWNER_ID).trim();
   if(owner && !ownerPinMatches(env,row.key_hash))throw new HttpError(401,'Sign in with your current owner key.');
-  const members=await roster(env);
+  const rememberDevice=row.expires===0;
+  let members;
+  try {members=await roster(env);}
+  catch(err){
+    if(rememberDevice)throw new HttpError(503,'Your device is still signed in. OC Manager needs a current faction roster to open your profile.','membership_pending');
+    throw err;
+  }
   const me=members.find(m=>m.id===row.member);
   if(!me){await env.DB.prepare('DELETE FROM portal_sessions WHERE member=?').bind(row.member).run();throw new HttpError(403,'Current faction membership is required.');}
   const staff=await env.DB.prepare('SELECT key_hash FROM portal_staff WHERE id=?').bind(me.id).first();
-  return {id:me.id,name:me.name,owner,staff:owner||staff?.key_hash===row.key_hash,members,keyHash:row.key_hash,token};
+  return {id:me.id,name:me.name,owner,staff:owner||staff?.key_hash===row.key_hash,members,keyHash:row.key_hash,token,rememberDevice};
 }
 export async function login(req,env) {
-  const {key}=await req.json();
+  const {key,rememberDevice}=await req.json();
+  if(rememberDevice!==undefined && typeof rememberDevice!=='boolean')throw new HttpError(400,'Choose a device preference.');
   if(typeof key!=='string'||!/^[A-Za-z0-9]{16}$/.test(key))throw new HttpError(400,'Enter your 16-character Torn API key.');
   const {info}=await torn(key,'key/info');
   const id=info?.user?.id;
@@ -122,15 +135,18 @@ export async function login(req,env) {
   if(owner && !ownerPinMatches(env,digest)){
     throw new HttpError(403,'Torn verified your owner account. Use the personal key paired with OC Manager, or pair this key below.','owner_key_pairing');
   }
+  const previous=sessionToken(req);
+  const tokenHash=await hash(token);
   const [,session]=await env.DB.batch([
     env.DB.prepare(`INSERT INTO portal_profiles VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE
       SET name=excluded.name, enrollment=excluded.enrollment
       WHERE portal_profiles.enrollment=excluded.enrollment OR ?=1`).bind(id,m.name,now(),digest,Number(owner)),
-    env.DB.prepare('INSERT INTO portal_sessions SELECT ?,id,enrollment,? FROM portal_profiles WHERE id=? AND enrollment=?').bind(await hash(token),now()+2592000,id,digest),
-    env.DB.prepare('UPDATE portal_staff SET key_hash=? WHERE id=? AND key_hash IS NULL AND EXISTS (SELECT 1 FROM portal_profiles WHERE id=? AND enrollment=?)').bind(digest,id,id,digest)
+    env.DB.prepare('INSERT INTO portal_sessions SELECT ?,id,enrollment,? FROM portal_profiles WHERE id=? AND enrollment=?').bind(tokenHash,sessionExpiry(rememberDevice),id,digest),
+    env.DB.prepare('UPDATE portal_staff SET key_hash=? WHERE id=? AND key_hash IS NULL AND EXISTS (SELECT 1 FROM portal_profiles WHERE id=? AND enrollment=?)').bind(digest,id,id,digest),
+    ...(previous?[env.DB.prepare('DELETE FROM portal_sessions WHERE digest=? AND member=? AND EXISTS (SELECT 1 FROM portal_sessions WHERE digest=?)').bind(await hash(previous),id,tokenHash)]:[])
   ]);
   if(session.meta.changes!==1)throw new HttpError(403,'Use your enrolled OC Manager key, or ask the owner to reset enrollment.');
-  return token;
+  return {token,rememberDevice};
 }
 async function saveCrimes(env,crimes,rosterMap,stamp) {
   // Batch a page of records into two database calls, leaving room for Torn requests.
@@ -177,7 +193,7 @@ export async function capture(env) {
   await env.DB.batch([
     env.DB.prepare("INSERT INTO portal_meta VALUES ('completedThrough',?) ON CONFLICT(k) DO UPDATE SET v=MAX(CAST(v AS INTEGER),CAST(excluded.v AS INTEGER))").bind(String(end)),
     env.DB.prepare("INSERT INTO portal_meta VALUES ('lastSuccess',?) ON CONFLICT(k) DO UPDATE SET v=MAX(CAST(v AS INTEGER),CAST(excluded.v AS INTEGER))").bind(String(stamp)),
-    env.DB.prepare('DELETE FROM portal_sessions WHERE expires<=?').bind(stamp)
+    env.DB.prepare('DELETE FROM portal_sessions WHERE expires>0 AND expires<=?').bind(stamp)
   ]);
 }
 export async function memberUsage(env,me) {
@@ -196,7 +212,7 @@ export async function dashboard(env,me,scope) {
   const mine=r=>r.participants.some(p=>p.id===me.id)||r.blockers.some(b=>b.id===me.id);
   const visible=scope==='staff'?records:records.filter(r=>mine(r)||r.phase==='Recruiting');
   const grants=me.owner && scope==='staff'?(await env.DB.prepare('SELECT id FROM portal_staff').all()).results.map(s=>s.id):[];
-  return {me:{id:me.id,name:me.name,owner:me.owner,staff:me.staff},crimes:visible.map(r=>{
+  return {me:{id:me.id,name:me.name,owner:me.owner,staff:me.staff},rememberDevice:me.rememberDevice,crimes:visible.map(r=>{
     if(scope==='staff'||mine(r))return r;
     return {...r,participants:[],blockers:[],spans:[],pauses:[],slots:r.slots.map(s=>({...s,member:s.member?'filled':null,cpr:null}))};
   }),roster:me.owner&&scope==='staff'?me.members.map(m=>({id:m.id,name:m.name,staff:grants.includes(m.id)})):[],
