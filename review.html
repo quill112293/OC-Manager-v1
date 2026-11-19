@@ -89,6 +89,9 @@ let savingDevice=false;
 function deviceSetting(checked=false){
   return '<label class="device-choice"><input type="checkbox" name="rememberDevice"'+(checked?' checked':'')+(savingDevice?' disabled':'')+'> Remember this device</label>';
 }
+// Torn's custom-key builder takes the requested selections in the preferences URL fragment.
+const createKeyLink='<a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&amp;title=OC%20Manager&amp;user=organizedcrimes&amp;faction=members" target="_blank" rel="noopener noreferrer">Create OC Manager key in Torn</a>';
+const keyExplanation='Your custom key lets OC Manager verify your faction membership and show your CPR for each open role. The key is discarded after the lookup.';
 function showGate(pending=false){
   tools.innerHTML=pending?btn('Sign out','out'):'';
   app.innerHTML=`<section class="gate" aria-labelledby="welcome-heading">
@@ -102,8 +105,8 @@ function showGate(pending=false){
         <label for="key">Your Torn API key</label>
         <input id="key" name="key" type="password" required pattern="[A-Za-z0-9]{16}" title="Enter your 16-character Torn API key" placeholder="Paste your 16-character key" autocomplete="off" autocapitalize="none" spellcheck="false">
         <button class="btn" type="submit">Open my profile</button>
-        <a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&amp;title=OC%20Manager%20Login&amp;type=1" target="_blank" rel="noopener noreferrer">Create a Public Only key in Torn</a>
-        <small>Your key verifies your faction membership and is discarded after sign-in.</small>
+        ${createKeyLink}
+        <small>${keyExplanation}</small>
       </form>`:window.OC_OFFLINE?'<a class="btn preview-sign-in" href="https://oc-manager-v1.975y7srs57.workers.dev/">Open OC Manager to sign in</a>':'<p class="desc">Member sign-in is temporarily unavailable.</p><button class="link tight" data-act="retry">Check again</button>'}
       <p id="feedback" class="error" role="alert"></p>
       <section id="owner-pairing" class="ownerPairing" aria-labelledby="pair-heading" hidden>
@@ -182,18 +185,18 @@ function weightSummary(r,own){
   const low=Math.min(...values),high=Math.max(...values);
   return 'Role weights · '+percent(low)+(low===high?'':'–'+percent(high));
 }
-function card(r,opened=false){
+function card(r,opened=false,personalOpening=false){
   const own=r.participants.find(p=>p.id===data.me.id);
   const item=(r.slots||[]).filter(s=>s.member&&s.available===false);
+  const openings=r.slots.filter(s=>!s.member).length;
   const detail=r.phase==='History'?day(r.executed)+' · '+r.status:r.phase==='Recruiting'?
-    r.slots.filter(s=>!s.member).length+' open roles':(own?own.role+' · ':'')+r.phase;
+    openings+(personalOpening?' qualifying opening':' open role')+(openings===1?'':'s'):(own?own.role+' · ':'')+r.phase;
   let body='';
   if(r.phase==='Recruiting'){
     body+=r.slots.map(s=>{
-      const noMinimum=r.level===1||r.level===2||(r.level>=3 && Number.isFinite(s.weight) && s.weight<=7);
       let state=s.member?'Filled':s.eligibility || 'Verify in Torn';
       if(!s.member && state==='Verify in Torn' && r.level>=3 && s.weight>7)state='60 CPR required';
-      const cpr=s.member || noMinimum?'':'<br><small>Your CPR · '+esc(s.profileCPR??'unverified')+'</small>';
+      const cpr=personalOpening?'<br><small>Your CPR · '+esc(s.profileCPR??'Sync to check')+'</small>':'';
       return row('<b>'+esc(s.role)+'</b><br><small>Weight · '+weightText(s.weight)+'</small>'+cpr,badge(state,state==='Eligible'||s.member?'':'warn'));
     }).join('')||empty('No roles in the latest snapshot.');
     body+='<a class="link" href="https://www.torn.com/factions.php?step=your#/tab=crimes" target="_blank" rel="noopener noreferrer">Open recruiting in Torn</a>';
@@ -207,6 +210,14 @@ function card(r,opened=false){
   const requirements=r.level===1||r.level===2?'No requirements':r.level>=3?'60 CPR minimum unless role weight is 7% or less':'Level unverified';
   body='<p class="kicker">'+requirements+'</p>'+body;
   return '<details class="card"'+(opened?' open':'')+'><summary><span class="level">LV<strong>'+esc(r.level??'–')+'</strong></span><span><b>'+esc(r.name)+'</b><span class="sub">#'+esc(r.id)+' · '+esc(detail)+'</span><span class="sub">'+weightSummary(r,own)+'</span></span></summary><div class="inner">'+body+'</div></details>';
+}
+function cprForm(){
+  const stamp=data.cprChecked?'Last personal sync · '+day(data.cprChecked)+' '+tct(data.cprChecked):'Sync to see your Torn CPR for each open role.';
+  return '<details class="panel"><summary>Sync my CPR</summary><form id="sync-cpr" class="form tight">'+
+    '<small>'+stamp+'</small>'+createKeyLink+
+    '<label for="cpr-key">Your OC Manager key</label><input id="cpr-key" name="key" type="password" pattern="[A-Za-z0-9]{16}" required autocomplete="off" autocapitalize="none" spellcheck="false">'+
+    '<small>'+keyExplanation+'</small>'+
+    '<button type="submit" class="btn">Sync my CPR</button><small role="status"></small></form></details>';
 }
 function draw(){
   if(!data){showGate();return;}
@@ -226,7 +237,7 @@ function draw(){
     list=filter==='Successful OCs'?history.filter(r=>r.status==='Successful'):
       history.filter(r=>delayed(r)&&(staff||r.blockers.some(b=>b.id===m.id)||r.spans.some(s=>s.id===m.id)));
   }else if(tab==='Recruiting'){
-    list=all.filter(r=>r.phase==='Recruiting');heading='Recruiting OCs';
+    list=data.recruiting||[];heading='Roles you qualify for';
   }else if(tab==='Active OCs'){
     const choices=['All phases','Recruiting','Planning','Executable'];if(!choices.includes(filter))filter=choices[0];
     chooser=buttons(choices,filter,'filter');list=active.filter(r=>filter==='All phases'||filter===r.phase);
@@ -243,7 +254,7 @@ function draw(){
   app.innerHTML='<div class="screen"><div class="hero line"><div><div class="eyebrow">Faction operations</div><h1>'+headingText+'</h1></div><div class="person"><span class="avatar">'+esc(m.name.slice(0,1))+'</span><span><b>'+esc(m.name)+'</b><br><small>'+esc(m.owner?'Owner':m.staff?'Staff':'Member')+' · #'+esc(m.id)+'</small></span></div></div>'+
     deviceSetting(data.rememberDevice)+panels+'<nav class="tabs" aria-label="Profile tabs">'+tabs.map(t=>btn(t,'tab',t,t===tab?'sel':'')).join('')+'</nav>'+
     '<p id="feedback" class="error" role="alert" hidden></p>'+(staffPanel||'<div class="grid"><section class="stack"><div><h2>'+esc(heading)+'</h2>'+(chooser?'<div class="pills">'+chooser+'</div>':'')+'</div>'+
-    (list.length?list.map((r,i)=>card(r,list.length===1&&i===0)).join(''):empty('No matching OCs in the available records.'))+'</section><aside class="panel side">'+side+'</aside></div>')+'</div>';
+    (tab==='Recruiting'?cprForm():'')+(list.length?list.map((r,i)=>card(r,list.length===1&&i===0,tab==='Recruiting')).join(''):empty(tab==='Recruiting'?'No qualifying openings in the latest available data.':'No matching OCs in the available records.'))+'</section><aside class="panel side">'+side+'</aside></div>')+'</div>';
   if(tab==='Manage staff')drawRoster('');
   if(tab==='Members' && m.owner)loadMemberUsage(document.getElementById('member-usage'));
   document.getElementById('foot').textContent=(data.trackingPaused?'OC tracking paused · ':'')+'Last successful faction check · '+(data.updated?day(data.updated)+' '+tct(data.updated):'Awaiting first check')+(data.updated&&Date.now()/1000-data.updated>600?' · Checks overdue':'');
@@ -338,6 +349,26 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('submit',async e=>{
   const form=e.target;
+  if(form.id==='sync-cpr'){
+    e.preventDefault();
+    const button=form.querySelector('button'),status=form.querySelector('[role="status"]');
+    if(button.disabled)return;
+    button.disabled=true;
+    status.textContent='Checking your open roles in Torn…';
+    const key=form.elements.key.value.trim();
+    form.elements.key.value='';
+    const memberId=data.me.id;
+    try{
+      await api('recruiting/sync',{key});
+      const refreshed=await api('profile?scope=member');
+      if(data?.me.id===memberId && scope==='member'){
+        data=refreshed;draw();
+        if(tab==='Recruiting')msg('Your CPR and qualifying openings are up to date.');
+      }
+    }catch(err){status.textContent=err.message;}
+    finally{button.disabled=false;}
+    return;
+  }
   if(form.id!=='login')return;
   e.preventDefault();
   const input=form.elements.key, button=form.querySelector('[type="submit"]');

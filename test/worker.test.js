@@ -274,3 +274,34 @@ test('remembering this browser is optional, editable, and revoked by sign-out', 
   assert.equal((await call(env,'/api/profile',{cookie:header(remembered)})).status,401);
   assert.equal((await profile(header(otherBrowser))).rememberDevice,true);
 });
+
+test('each member sees only their qualifying openings and their own CPR even with the tracker offline', async t=>{
+  const time=1940000000;
+  t.mock.method(Date,'now',()=>time*1000);
+  db.exec("DELETE FROM portal_meta WHERE k='rosterAt'; DELETE FROM portal_roster");
+  const env={DB:d1,FACTION_ID:'54',OWNER_ID:'999'};
+  const firstKey='j'.repeat(16),secondKey='l'.repeat(16),publicKey='p'.repeat(16);
+  t.mock.method(globalThis,'fetch',async(url,init)=>{
+    const key=init.headers.Authorization.slice(7),id=key===secondKey?721:720;
+    if(url.pathname==='/v2/key/info')return Response.json({info:{user:{id,faction_id:54},selections:{user:key===publicKey?[]:['organizedcrimes']}}});
+    if(url.pathname==='/v2/faction/54/members')return Response.json({members:[{id:720,name:'First'},{id:721,name:'Second'}]});
+    assert.equal(url.pathname,'/v2/user/organizedcrimes');
+    const seat=(label,cpr,user=null)=>({position_info:{label},user,checkpoint_pass_rate:cpr});
+    return Response.json({organizedcrimes:[
+      {id:871,name:'Stage Fright',difficulty:4,status:'Recruiting',slots:[seat('Muscle #2',id===720?21:30),seat('Muscle #1',id===720?59:60),seat('Sniper',99,{id:801})]},
+      {id:872,name:'Pet Project',difficulty:1,status:'Recruiting',slots:[seat('Muscle',0)]},
+      {id:873,name:'Market Forces',difficulty:3,status:'Recruiting',slots:[seat('Enforcer',id===720?50:70)]}
+    ]});
+  });
+  const login=async key=>(await call(env,'/api/login',{body:{key}})).headers.get('Set-Cookie').split(';')[0];
+  const alice=await login(publicKey),bob=await login(secondKey);
+  const sync=(cookie,key)=>call(env,'/api/recruiting/sync',{cookie,body:{key}});
+  const profile=async cookie=>(await call(env,'/api/profile',{cookie})).json();
+  assert.equal((await sync(alice,publicKey)).status,403);
+  assert.equal((await sync(alice,secondKey)).status,403);
+  assert.equal((await profile(alice)).cprChecked,null);
+  assert.equal((await sync(alice,firstKey)).status,200);
+  const result=async cookie=>(await profile(cookie)).recruiting.map(r=>[r.id,r.slots.map(s=>[s.role,s.profileCPR])]);
+  assert.deepEqual(await result(alice),[[871,[['Muscle #2',21]]],[872,[['Muscle',0]]]]);
+  assert.deepEqual(await result(bob),[[871,[['Muscle #2',30],['Muscle #1',60]]],[872,[['Muscle',0]]],[873,[['Enforcer',70]]]]);
+});

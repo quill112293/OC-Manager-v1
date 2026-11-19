@@ -16,7 +16,7 @@ Open [review.html](./review.html) in a browser to view the welcome layout. The s
 4. Deploy using `npx wrangler deploy`. The five-minute trigger starts collecting active and completed records. On a new database the first completed-crime window covers the preceding day. Historical travel and item observations begin with collection. The same database schema can read earlier oc_records rows, with missing fields shown as unverified.
 5. Open the Worker URL in any browser. A Torn script is optional. For a shortcut from Torn’s faction page, install `/oc-manager.user.js` from your own Worker URL with your userscript manager. The shortcut opens your portal and receives no keys.
 
-The member key is used only to verify identity and faction during sign-in. The Worker stores the enrolled key fingerprint, player profile and a hashed, revocable session token. The raw personal key is discarded. Member data is read through the session, staff requests are checked server-side, and membership is refreshed from Torn at most five minutes apart. To reset a member’s enrollment after key replacement, the operator removes that member’s portal sessions, staff grant and profile before trusted re-enrollment. The owner has a separately pinned key.
+The member key verifies identity and faction during sign-in and syncs personal recruiting CPR when permitted. The Worker stores the enrolled key fingerprint, player profile and a hashed, revocable session token. The raw personal key is discarded. Member data is read through the session, staff requests are checked server-side, and membership is refreshed from Torn at most five minutes apart. To reset a member’s enrollment after key replacement, the operator removes that member’s portal sessions, staff grant and profile before trusted re-enrollment. The owner has a separately pinned key.
 
 ## Data in V1
 
@@ -29,3 +29,5 @@ Levels 1–2 have no entry requirements. For level 3 and up, a role qualifies wi
 ## Development
 
 Run `npm test` with Node 24 or newer. Run `npm run preview` to regenerate the offline review from the same UI assets as the Worker.
+
+The personal Recruiting tab lists only open seats that meet the faction rules for the signed-in player. **Sync my CPR** reads Torn’s `user/organizedcrimes` using the member’s custom OC Manager key. The Torn creation link requests `user/organizedcrimes` for personal CPR and `faction/members` for faction verification. Torn includes `key/info` for identity checks. Existing Public Only sign-in keys still work. Only the member’s snapshot is stored. Openings expire from the listing after 15 minutes without a fresh personal or faction observation. For a matching seat still open in newer faction data the last personal CPR is used for up to 24 hours.

@@ -41,3 +41,18 @@ test('saved OC records resolve role-specific weights without guessing ambiguous 
   assert.equal(historic.participants[0].weight,card.slots[0].weight);
   assert.equal(present({...record,name:'Future OC'}).slots[1].weight,null);
 });
+
+test('newer observations remove filled and closed jobs without substituting tracker CPR',async()=>{
+  const {recruitingFor}=await import('../src/model.js');
+  const at=90000;
+  const base={id:5,name:'Stage Fright',level:4,status:'Recruiting',last:at-10,slots:[
+    {role:'Muscle #1',profileCPR:89},{role:'Sniper',profileCPR:60},{role:'Muscle #2',profileCPR:10}
+  ]};
+  const personal=present(base),snapshot={checked:at-10,crimes:[personal]};
+  const fresh=present({...base,last:at,slots:[{member:11,role:'Muscle #1'},{role:'Sniper',cpr:9},{role:'Muscle #2',cpr:95}]});
+  assert.deepEqual(recruitingFor([fresh],snapshot,at)[0].slots.map(s=>s.profileCPR),[60,10]);
+  assert.deepEqual(recruitingFor([fresh],null,at)[0].slots.map(s=>[s.role,s.profileCPR]),[['Muscle #2',null]]);
+  assert.deepEqual(recruitingFor([fresh],{checked:at+1,crimes:[]},at+1),[]);
+  assert.deepEqual(recruitingFor([{...fresh,phase:'Planning'}],snapshot,at),[]);
+  assert.deepEqual(recruitingFor([fresh],snapshot,at+901),[]);
+});

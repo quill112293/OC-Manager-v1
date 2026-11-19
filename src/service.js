@@ -1,5 +1,5 @@
 import {startRecord, observe} from './observe.js';
-import {present} from './model.js';
+import {present,recruitingFor} from './model.js';
 
 export const now=()=>Math.floor(Date.now()/1000);
 export async function hash(s) {
@@ -119,6 +119,30 @@ export async function identity(req,env) {
   const staff=await env.DB.prepare('SELECT key_hash FROM portal_staff WHERE id=?').bind(me.id).first();
   return {id:me.id,name:me.name,owner,staff:owner||staff?.key_hash===row.key_hash,members,keyHash:row.key_hash,token,rememberDevice};
 }
+async function savePersonalOpenings(env,id,key){
+  const started=Date.now();
+  const {organizedcrimes}=await torn(key,'user/organizedcrimes');
+  if(!Array.isArray(organizedcrimes))throw new HttpError(503,'Torn did not return your recruiting roles.');
+  const crimes=organizedcrimes.filter(c=>c.status==='Recruiting' && Number.isSafeInteger(c.id)).map(c=>present({
+    id:c.id,name:c.name,level:c.difficulty,status:c.status,last:Math.floor(started/1000),expires:c.expired_at,
+    slots:c.slots.filter(s=>!s.user).map(s=>({role:s.position_info?.label || s.position,member:null,
+      profileCPR:Number.isFinite(s.checkpoint_pass_rate) && s.checkpoint_pass_rate>=0 && s.checkpoint_pass_rate<=100?s.checkpoint_pass_rate:null}))
+  }));
+  await env.DB.prepare(`INSERT INTO portal_recruiting(member,checked,body) VALUES (?,?,?)
+    ON CONFLICT(member) DO UPDATE SET checked=excluded.checked,body=excluded.body WHERE excluded.checked>=portal_recruiting.checked`)
+    .bind(id,started,JSON.stringify(crimes)).run();
+}
+
+export async function syncRecruiting(req,env,me){
+  const {key}=await req.json();
+  if(typeof key!=='string'||!/^[A-Za-z0-9]{16}$/.test(key))throw new HttpError(400,'Enter your personal 16-character CPR key.');
+  if(key===env.TORN_KEY?.trim())throw new HttpError(403,'Use your personal CPR key.');
+  const {info}=await torn(key,'key/info');
+  if(info?.user?.id!==me.id || String(info.user.faction_id)!==String(env.FACTION_ID))throw new HttpError(403,'Use a key for the Torn account signed into this profile.');
+  if(!info.selections?.user?.includes('organizedcrimes'))throw new HttpError(403,'This key needs access to user/organizedcrimes. Create a CPR key using the link in Recruiting.');
+  await savePersonalOpenings(env,me.id,key);
+}
+
 export async function login(req,env) {
   const {key,rememberDevice}=await req.json();
   if(rememberDevice!==undefined && typeof rememberDevice!=='boolean')throw new HttpError(400,'Choose a device preference.');
@@ -146,6 +170,9 @@ export async function login(req,env) {
     ...(previous?[env.DB.prepare('DELETE FROM portal_sessions WHERE digest=? AND member=? AND EXISTS (SELECT 1 FROM portal_sessions WHERE digest=?)').bind(await hash(previous),id,tokenHash)]:[])
   ]);
   if(session.meta.changes!==1)throw new HttpError(403,'Use your enrolled OC Manager key, or ask the owner to reset enrollment.');
+  if(key!==env.TORN_KEY?.trim() && info.selections?.user?.includes('organizedcrimes')){
+    try{await savePersonalOpenings(env,id,key);}catch{ /* A CPR lookup can be retried in Recruiting. */ }
+  }
   return {token,rememberDevice};
 }
 async function saveCrimes(env,crimes,rosterMap,stamp) {
@@ -210,11 +237,12 @@ export async function dashboard(env,me,scope) {
   if(scope==='staff'&&!me.staff)throw new HttpError(403,'Staff access required.');
   const records=(await env.DB.prepare('SELECT body FROM oc_records ORDER BY id DESC').all()).results.map(x=>present(JSON.parse(x.body)));
   const mine=r=>r.participants.some(p=>p.id===me.id)||r.blockers.some(b=>b.id===me.id);
-  const visible=scope==='staff'?records:records.filter(r=>mine(r)||r.phase==='Recruiting');
+  const visible=scope==='staff'?records:records.filter(mine);
+  const saved=scope==='staff'?null:await env.DB.prepare('SELECT checked,body FROM portal_recruiting WHERE member=?').bind(me.id).first();
+  const snapshot=saved?{checked:Math.floor(saved.checked/1000),crimes:JSON.parse(saved.body)}:null;
   const grants=me.owner && scope==='staff'?(await env.DB.prepare('SELECT id FROM portal_staff').all()).results.map(s=>s.id):[];
-  return {me:{id:me.id,name:me.name,owner:me.owner,staff:me.staff},rememberDevice:me.rememberDevice,crimes:visible.map(r=>{
-    if(scope==='staff'||mine(r))return r;
-    return {...r,participants:[],blockers:[],spans:[],pauses:[],slots:r.slots.map(s=>({...s,member:s.member?'filled':null,cpr:null}))};
-  }),roster:me.owner&&scope==='staff'?me.members.map(m=>({id:m.id,name:m.name,staff:grants.includes(m.id)})):[],
+  return {me:{id:me.id,name:me.name,owner:me.owner,staff:me.staff},rememberDevice:me.rememberDevice,crimes:visible,
+    recruiting:scope==='staff'?[]:recruitingFor(records,snapshot,now()),cprChecked:snapshot?.checked??null,
+    roster:me.owner&&scope==='staff'?me.members.map(m=>({id:m.id,name:m.name,staff:grants.includes(m.id)})):[],
     trackingPaused:!env.TORN_KEY?.trim(),updated:Number((await env.DB.prepare("SELECT v FROM portal_meta WHERE k='lastSuccess'").first())?.v)||0};
 }

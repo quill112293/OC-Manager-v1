@@ -47,8 +47,37 @@ export function present(r) {
     ...person,weight:slots.find(slot=>slot.member===person.id && slot.role===person.role)?.weight ?? roleWeight(r.name,person.role)
   }));
   return {id:r.id,name:r.name,level:r.level??null,phase:phase(r,r.last),status:r.status,
-    ready:r.ready,executed:r.executed,updated:r.last,participants,
+    ready:r.ready,expires:r.expires??null,executed:r.executed,updated:r.last,participants,
     slots,spans:timeline(r),pauses:r.planningPauses||[],
     events:Object.entries(r.blocks||{}).flatMap(([,b])=>b.runs.map(s=>({at:s.start,label:b.name+' observed · '+s.reason}))).sort((a,b)=>a.at-b.at),
     blockers:Object.entries(r.blocks||{}).map(([id,b])=>({id:Number(id),name:b.name,reasons:[...new Set(b.runs.map(x=>x.reason))]}))};
+}
+
+// A personal response lists only this player's recruiting openings. Newer faction
+// observations can close or fill those seats, but their CPR belongs to the tracker.
+export function recruitingFor(records, snapshot, at) {
+  const checked=snapshot?.checked ?? 0;
+  const personal=new Map((snapshot?.crimes || []).map(crime=>[crime.id,crime]));
+  const latest=new Map(records.map(crime=>[crime.id,crime]));
+  for(const crime of personal.values()){
+    if(!latest.has(crime.id) || latest.get(crime.id).updated<checked)latest.set(crime.id,crime);
+  }
+  const result=[];
+  for(const crime of latest.values()){
+    if(crime.phase!=='Recruiting' || at-crime.updated>900 || (crime.expires && crime.expires<=at))continue;
+    const mine=personal.get(crime.id);
+    if(checked && checked>=crime.updated && !mine)continue;
+    const scores=checked && at-checked<=86400 && mine?.name===crime.name ? mine.slots : [];
+    const slots=[];
+    for(const seat of crime.slots){
+      if(seat.member)continue;
+      const matches=scores.filter(s=>s.role===seat.role);
+      if(crime!==mine && crime.updated===checked && !matches.length)continue;
+      const cpr=crime===mine?seat.profileCPR:matches.length===1?matches[0].profileCPR:null;
+      if(eligibility(crime.level,cpr,seat.weight)!=='Eligible')continue;
+      slots.push({role:seat.role,member:null,weight:seat.weight,profileCPR:cpr??null,eligibility:'Eligible'});
+    }
+    if(slots.length)result.push({...crime,participants:[],blockers:[],events:[],spans:[],pauses:[],slots});
+  }
+  return result;
 }

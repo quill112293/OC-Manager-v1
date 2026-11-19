@@ -52,6 +52,7 @@ function observe(rec, c, members, balances, at) {
   const joined = people(c,members);
   const cont = before?.due && snap.due && before.ready === snap.ready && at - oldTime <= MAX_SAMPLE_GAP;
   rec.level = Number.isInteger(c.difficulty) ? c.difficulty : rec.level ?? null;
+  rec.expires = c.expired_at ?? rec.expires ?? null;
   rec.slots = (c.slots || []).map(s => ({
     role: s.position_info?.label || s.position,
     member: s.user?.id || null, cpr: s.user?.id ? s.checkpoint_pass_rate ?? null : null,
