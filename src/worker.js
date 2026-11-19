@@ -8,6 +8,7 @@ const schema = [
   "CREATE INDEX IF NOT EXISTS portal_session_expiry ON portal_sessions(expires);",
   "CREATE TABLE IF NOT EXISTS portal_staff (id INTEGER PRIMARY KEY, key_hash TEXT);",
   "CREATE TABLE IF NOT EXISTS portal_roster (id INTEGER PRIMARY KEY, name TEXT NOT NULL, checked INTEGER NOT NULL);",
+  "CREATE TABLE IF NOT EXISTS portal_roster_details (id INTEGER PRIMARY KEY REFERENCES portal_roster(id) ON DELETE CASCADE, checked INTEGER NOT NULL, level INTEGER, position TEXT, days_in_faction INTEGER, is_in_oc INTEGER);",
   "CREATE TABLE IF NOT EXISTS portal_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);"
 ];
 const initializedDatabases = new WeakMap();

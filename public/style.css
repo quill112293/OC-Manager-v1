@@ -52,3 +52,7 @@ header :focus-visible, .side :focus-visible { outline-color: var(--ice); }
 .device-choice input[type="checkbox"] { width: 20px; height: 20px; margin: 0; padding: 0; accent-color: var(--blue); }
 
 .card summary .sub { display: block; }
+.profile-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 14px; margin: 12px 0 0; }
+.profile-facts dt { color: var(--muted); font-size: 14px; }
+.profile-facts dd { margin: 0; font-size: 19px; font-weight: 650; overflow-wrap: anywhere; }
+.profile-result { padding-top: 12px; border-top: 1px solid var(--line); }

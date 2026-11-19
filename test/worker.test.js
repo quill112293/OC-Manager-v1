@@ -234,6 +234,40 @@ test('only the owner can list current members who have signed in, including earl
   ]});
 });
 
+test('first sign-in upgrades the legacy roster and returns only the signed-in member’s faction details', async t => {
+  let time=1915000000;
+  t.mock.method(Date,'now',()=>time*1000);
+  db.exec('DELETE FROM portal_roster_details; DELETE FROM portal_roster');
+  db.prepare('INSERT OR REPLACE INTO portal_meta VALUES (?,?)').run('rosterAt',String(time));
+  db.prepare('INSERT INTO portal_roster VALUES (?,?,?)').run(967,'New member',time);
+  const key='f'.repeat(16);
+  const env={DB:d1,FACTION_ID:'75',OWNER_ID:'999'};
+  let rosterReads=0;
+  const member={id:967,name:'New member',level:8,position:'Recruit',days_in_faction:0,is_in_oc:false};
+  const other={id:968,name:'Another member',level:98,position:'Leader',days_in_faction:100,is_in_oc:true};
+  t.mock.method(globalThis,'fetch',async url=>{
+    if(url.pathname==='/v2/key/info')return Response.json({info:{user:{id:967,faction_id:75}}});
+    assert.equal(url.pathname,'/v2/faction/75/members');
+    rosterReads++;
+    return Response.json({members:[member,other]});
+  });
+  const signIn=async()=>{
+    const result=await call(env,'/api/login',{body:{key}});
+    assert.equal(result.status,200);
+    return result.headers.get('Set-Cookie').split(';')[0];
+  };
+  const profile=async cookie=>(await call(env,'/api/profile',{cookie})).json();
+  const first=await profile(await signIn());
+  assert.deepEqual(first.profile,{level:8,position:'Recruit',daysInFaction:0,inOC:false});
+  assert.deepEqual(first.roster,[]);
+  assert.equal(rosterReads,1);
+  time+=301;
+  member.position='Member';member.is_in_oc=true;delete member.days_in_faction;
+  const next=await profile(await signIn());
+  assert.deepEqual(next.profile,{level:8,position:'Member',daysInFaction:null,inOC:true});
+  assert.equal(rosterReads,2);
+});
+
 test('remembering this browser is optional, editable, and revoked by sign-out', async t => {
   let time=1920000000;
   t.mock.method(Date,'now',()=>time*1000);

@@ -159,13 +159,49 @@ function cprForm(){
     '<small>'+keyExplanation+'</small>'+
     '<button type="submit" class="btn">Sync my CPR</button><small role="status"></small></form></details>';
 }
+function memberOverview(){
+  const member=data.profile||{}, id=data.me.id;
+  const fact=(label,value)=>'<div><dt>'+label+'</dt><dd>'+esc(value??'Unavailable')+'</dd></div>';
+  const days=member.daysInFaction;
+  const facts=fact('Torn level',member.level)+fact('Faction position',member.position)+
+    fact('Time in faction',days==null?null:days+(days===1?' day':' days'));
+  const occupied=crime=>crime.slots.find(s=>s.member===id) ||
+    (!crime.slots.length && crime.participants.find(p=>p.id===id));
+  const assignment=member.inOC===false?null:data.crimes.filter(r=>r.phase!=='History' && occupied(r))
+    .sort((a,b)=>b.updated-a.updated)[0];
+  let current;
+  if(assignment){
+    const seat=occupied(assignment);
+    current='<h3>'+esc(assignment.name)+'</h3><p>'+esc(seat.role)+' · '+esc(assignment.phase)+'</p>'+
+      '<p class="sub">Role weight · '+weightText(seat.weight)+(Number.isFinite(seat.cpr)?' · Your CPR · '+esc(seat.cpr):'')+'</p>'+
+      (assignment.ready?'<p class="sub">Scheduled start · '+esc(day(assignment.ready)+' '+tct(assignment.ready))+'</p>':'')+
+      '<p class="sub">Last recorded · '+esc(day(assignment.updated)+' '+tct(assignment.updated))+'</p>';
+  }else{
+    const state=member.inOC===true?'You’re in an OC. The assignment details haven’t been recorded yet.':
+      member.inOC===false?'You’re not currently in an OC.':'Your OC assignment hasn’t been confirmed yet.';
+    current='<p>'+esc(state)+'</p>';
+  }
+  const recent=data.crimes.filter(r=>r.phase==='History' && (occupied(r)||r.participants.some(p=>p.id===id)))
+    .sort((a,b)=>(b.executed||b.updated)-(a.executed||a.updated))[0];
+  const result=recent?'<div class="profile-result"><h3>Last recorded result</h3><p>'+esc(recent.name)+' · '+esc(recent.status)+'</p>'+
+    '<small>'+esc((occupied(recent)||recent.participants.find(p=>p.id===id))?.role)+' · '+esc(day(recent.executed||recent.updated))+'</small></div>':'';
+  const roles=(data.recruiting||[]).flatMap(crime=>crime.slots.map(seat=>({crime,seat})));
+  const best=roles.filter(r=>Number.isFinite(r.seat.profileCPR)).sort((a,b)=>b.seat.profileCPR-a.seat.profileCPR)[0];
+  const opening=best?'<p class="sub">Highest recorded CPR among your openings</p><h3>'+esc(best.crime.name)+'</h3>'+
+    '<p>'+esc(best.seat.role)+'</p><p>Your CPR · <strong>'+esc(best.seat.profileCPR)+'</strong> · Role weight · '+weightText(best.seat.weight)+'</p>':
+    '<p>'+(roles.length?'Open Recruiting to see the roles you qualify for.':data.cprChecked?'No qualifying roles in the available records.':'Open Recruiting to check your roles and sync your CPR.')+'</p>';
+  return '<section class="stack"><div class="panel"><h2>Faction details</h2><dl class="profile-facts">'+facts+'</dl></div>'+
+    '<div class="grid"><section class="panel stack"><h2>Your OC assignment</h2><div>'+current+'</div>'+result+'</section>'+
+    '<section class="panel stack"><h2>Qualifying roles'+(roles.length?' ('+roles.length+')':'')+'</h2><div>'+opening+'</div>'+
+    '<div>'+btn('View recruiting','tab','Recruiting','link')+'</div></section></div></section>';
+}
 function draw(){
   if(!data){showGate();return;}
   const staff=scope==='staff',m=data.me;
   const all=staff?data.crimes:data.crimes.filter(r=>mine(r)||r.phase==='Recruiting');
   const active=all.filter(r=>r.phase!=='History'&&(staff||mine(r))),history=all.filter(r=>r.phase==='History'&&(staff||mine(r)));
   const historic=tab==='OC History'||tab==='View History';
-  const tabs=staff?['Active OCs','OC History']:['Recruiting','My OCs','View History'];
+  const tabs=staff?['Active OCs','OC History']:['Overview','Recruiting','My OCs','View History'];
   if(m.owner)tabs.splice(1,0,'Members');
   if(staff && m.owner)tabs.push('Manage staff');
   tools.innerHTML=(m.staff?btn(staff?'My Profile':'Staff','scope',staff?'member':'staff'):'')+btn('Sign out','out');
@@ -185,14 +221,14 @@ function draw(){
   const tile=(n,l)=>'<div class="tile"><b>'+n+'</b><span>'+l+'</span></div>';
   const panels='<div class="summary">'+tile(active.length,'Active OCs')+tile(history.filter(r=>r.status==='Successful').length,'Successful OCs')+
     tile(history.filter(r=>delayed(r)&&(staff||r.blockers.some(b=>b.id===m.id))).length,'Delay records')+'</div>';
-  let staffPanel='';
+  let staffPanel=tab==='Overview' && !staff?memberOverview():'';
   if(tab==='Members' && m.owner)staffPanel='<section class="panel stack" id="member-usage"><h2>Members</h2><p role="status">Loading member sign-ins…</p></section>';
   if(tab==='Manage staff') staffPanel='<div class="panel stack"><h2>Manage staff</h2><label for="member-search">Search faction roster</label><input class="search" id="member-search" placeholder="Name or Torn ID"><div id="roster-list"></div></div>';
   const headingText=staff?'Staff panel':'My Profile';
   const side=historic?'<div class="eyebrow">History</div><h2>Delay records</h2><p class="desc">Open a crime to see the roster, each recorded cause, and time awaiting execution.</p>':
     '<div class="eyebrow">Faction policy</div><h2>Entry requirements</h2>'+row('Levels 1–2','No requirements')+row('Level 3+ · weight ≤ 7%','No CPR minimum')+row('Level 3+ · weight > 7%','60 CPR minimum');
   app.innerHTML='<div class="screen"><div class="hero line"><div><div class="eyebrow">Faction operations</div><h1>'+headingText+'</h1></div><div class="person"><span class="avatar">'+esc(m.name.slice(0,1))+'</span><span><b>'+esc(m.name)+'</b><br><small>'+esc(m.owner?'Owner':m.staff?'Staff':'Member')+' · #'+esc(m.id)+'</small></span></div></div>'+
-    deviceSetting(data.rememberDevice)+panels+'<nav class="tabs" aria-label="Profile tabs">'+tabs.map(t=>btn(t,'tab',t,t===tab?'sel':'')).join('')+'</nav>'+
+    deviceSetting(data.rememberDevice)+(tab==='Overview'?'':panels)+'<nav class="tabs" aria-label="Profile tabs">'+tabs.map(t=>btn(t,'tab',t,t===tab?'sel':'')).join('')+'</nav>'+
     '<p id="feedback" class="error" role="alert" hidden></p>'+(staffPanel||'<div class="grid"><section class="stack"><div><h2>'+esc(heading)+'</h2>'+(chooser?'<div class="pills">'+chooser+'</div>':'')+'</div>'+
     (tab==='Recruiting'?cprForm():'')+(list.length?list.map((r,i)=>card(r,list.length===1&&i===0,tab==='Recruiting')).join(''):empty(tab==='Recruiting'?'No qualifying openings in the latest available data.':'No matching OCs in the available records.'))+'</section><aside class="panel side">'+side+'</aside></div>')+'</div>';
   if(tab==='Manage staff')drawRoster('');
@@ -235,7 +271,7 @@ function drawRoster(q){
 }
 async function reloadScope(next){
   data=await api('profile?scope='+next);
-  scope=next;tab=next==='staff'?'Active OCs':data.crimes.some(r=>r.phase!=='History'&&mine(r))?'My OCs':'Recruiting';filter='';draw();
+  scope=next;tab=next==='staff'?'Active OCs':'Overview';filter='';draw();
 }
 document.addEventListener('input',e=>{
   const input=e.target;

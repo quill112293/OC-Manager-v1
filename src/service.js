@@ -77,8 +77,10 @@ export async function factionWelcome(env) {
 }
 
 export async function roster(env,{refresh=false,signInKey}={}) {
-  const db=env.DB, stamp=Number((await db.prepare("SELECT v FROM portal_meta WHERE k='rosterAt'").first())?.v||0);
-  if(refresh || now()-stamp>=300){
+  const db=env.DB;
+  const cache=await db.prepare(`SELECT v, EXISTS(SELECT 1 FROM portal_roster_details WHERE checked=CAST(v AS INTEGER)) AS hasDetails
+    FROM portal_meta WHERE k='rosterAt'`).first();
+  if(refresh || now()-Number(cache?.v||0)>=300 || (signInKey && !cache?.hasDetails)){
     const snapshot=now();
     const trackerKey=env.TORN_KEY?.trim();
     if(!trackerKey && !signInKey)throw new HttpError(401,'Sign in again so Torn can confirm your current faction membership.','membership_recheck');
@@ -86,13 +88,22 @@ export async function roster(env,{refresh=false,signInKey}={}) {
       ? await torn(trackerKey,'faction/members')
       : await torn(signInKey,'faction/'+encodeURIComponent(env.FACTION_ID)+'/members');
     if(!Array.isArray(members)||members.some(m=>!Number.isInteger(m.id)||!m.name))throw new HttpError(503,'Faction roster unavailable.');
-    const rows=[db.prepare(`INSERT INTO portal_roster SELECT json_extract(value,'$.id'),json_extract(value,'$.name'),? FROM json_each(?) WHERE true
-      ON CONFLICT(id) DO UPDATE SET name=excluded.name,checked=excluded.checked WHERE excluded.checked>=checked`).bind(snapshot,JSON.stringify(members.map(m=>({id:m.id,name:m.name}))))];
-    await db.batch([...rows,db.prepare('DELETE FROM portal_roster WHERE checked<?').bind(snapshot),
+    const values=JSON.stringify(members.map(({id,name,level,position,days_in_faction,is_in_oc})=>
+      ({id,name,level,position,days_in_faction,is_in_oc})));
+    await db.batch([
+      db.prepare(`INSERT INTO portal_roster SELECT json_extract(value,'$.id'),json_extract(value,'$.name'),? FROM json_each(?) WHERE true
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name,checked=excluded.checked WHERE excluded.checked>=checked`).bind(snapshot,values),
+      db.prepare(`INSERT INTO portal_roster_details (id,checked,level,position,days_in_faction,is_in_oc)
+        SELECT r.id,r.checked,j.value->>'$.level',j.value->>'$.position',j.value->>'$.days_in_faction',j.value->>'$.is_in_oc'
+        FROM json_each(?) j JOIN portal_roster r ON r.id=j.value->>'$.id' WHERE r.checked=?
+        ON CONFLICT(id) DO UPDATE SET checked=excluded.checked,level=excluded.level,position=excluded.position,
+          days_in_faction=excluded.days_in_faction,is_in_oc=excluded.is_in_oc`).bind(values,snapshot),
+      db.prepare('DELETE FROM portal_roster WHERE checked<?').bind(snapshot),
       db.prepare("INSERT INTO portal_meta VALUES ('rosterAt',?) ON CONFLICT(k) DO UPDATE SET v=MAX(CAST(v AS INTEGER),CAST(excluded.v AS INTEGER))").bind(String(snapshot))]);
     return members;
   }
-  return (await db.prepare('SELECT id,name FROM portal_roster ORDER BY name').all()).results;
+  return (await db.prepare(`SELECT r.id,r.name,d.level,d.position,d.days_in_faction,d.is_in_oc
+    FROM portal_roster r LEFT JOIN portal_roster_details d ON d.id=r.id AND d.checked=r.checked ORDER BY r.name`).all()).results;
 }
 export const SESSION_SECONDS=30*24*60*60;
 // Zero is the persisted marker for a remembered session with no server-side deadline.
@@ -241,7 +252,13 @@ export async function dashboard(env,me,scope) {
   const saved=scope==='staff'?null:await env.DB.prepare('SELECT checked,body FROM portal_recruiting WHERE member=?').bind(me.id).first();
   const snapshot=saved?{checked:Math.floor(saved.checked/1000),crimes:JSON.parse(saved.body)}:null;
   const grants=me.owner && scope==='staff'?(await env.DB.prepare('SELECT id FROM portal_staff').all()).results.map(s=>s.id):[];
+  const member=me.members.find(m=>m.id===me.id);
+  const profile=scope==='staff'?null:{
+    level:member.level??null,position:member.position??null,daysInFaction:member.days_in_faction??null,
+    inOC:member.is_in_oc==null?null:Boolean(member.is_in_oc)
+  };
   return {me:{id:me.id,name:me.name,owner:me.owner,staff:me.staff},rememberDevice:me.rememberDevice,crimes:visible,
+    profile,
     recruiting:scope==='staff'?[]:recruitingFor(records,snapshot,now()),cprChecked:snapshot?.checked??null,
     roster:me.owner&&scope==='staff'?me.members.map(m=>({id:m.id,name:m.name,staff:grants.includes(m.id)})):[],
     trackingPaused:!env.TORN_KEY?.trim(),updated:Number((await env.DB.prepare("SELECT v FROM portal_meta WHERE k='lastSuccess'").first())?.v)||0};
