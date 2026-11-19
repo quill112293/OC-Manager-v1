@@ -53,6 +53,8 @@ header :focus-visible, .side :focus-visible { outline-color: var(--ice); }
 
 .device-choice { display: inline-flex; align-items: center; gap: 9px; min-height: 44px; width: fit-content; cursor: pointer; }
 .device-choice input[type="checkbox"] { width: 20px; height: 20px; margin: 0; padding: 0; accent-color: var(--blue); }
+
+.card summary .sub { display: block; }
 </style></head><body>
 <header><div class="frame head"><a href="#profile" id="brand" aria-label="OC Manager home"><span class="mark" aria-hidden="true">◈</span> OC Manager</a><div class="utilities" id="tools"></div></div></header>
 <main class="frame" id="app"></main><footer class="frame"><span>OC Manager</span><span id="foot">Faction operations</span></footer>
@@ -160,11 +162,25 @@ function timing(r){
   out+=(r.events||[]).map(e=>'<small>'+esc(tct(e.at)+' · '+e.label)+'</small>').join('');
   return out;
 }
+const percent=value=>Number(value.toFixed(2))+'%';
+const weightText=value=>Number.isFinite(value)?percent(value):'Unknown';
 function roster(r){
-  return '<h3>OC roster</h3>'+r.participants.map(p=>{
-    const b=r.blockers.find(b=>b.id===p.id);
-    return '<div class="'+(b?'issue':'')+'">'+row('<b>'+esc(p.name)+'</b><br><small>'+esc(p.role)+'</small>',b?'Delayed by · '+esc(b.reasons.join(', ')):'')+'</div>';
+  const seats=r.slots.length?r.slots:r.participants.map(p=>({role:p.role,member:p.id,weight:p.weight}));
+  return '<h3>OC roster</h3>'+seats.map(seat=>{
+    const person=r.participants.find(p=>p.id===seat.member);
+    const blocker=r.blockers.find(b=>b.id===seat.member);
+    const detail=person?.name || (seat.member?'Filled':'Open');
+    return '<div class="'+(blocker?'issue':'')+'">'+row('<b>'+esc(seat.role)+'</b><br><small>'+esc(detail)+'</small>',
+      'Weight · '+weightText(seat.weight)+(blocker?'<br><small>Delayed by · '+esc(blocker.reasons.join(', '))+'</small>':''))+'</div>';
   }).join('');
+}
+function weightSummary(r,own){
+  if(own && Number.isFinite(own.weight))return 'Your role weight · '+percent(own.weight);
+  const seats=r.slots.length?r.slots:r.participants;
+  const values=seats.map(seat=>seat.weight).filter(Number.isFinite);
+  if(!values.length)return 'Role weights · Unknown';
+  const low=Math.min(...values),high=Math.max(...values);
+  return 'Role weights · '+percent(low)+(low===high?'':'–'+percent(high));
 }
 function card(r,opened=false){
   const own=r.participants.find(p=>p.id===data.me.id);
@@ -173,12 +189,13 @@ function card(r,opened=false){
     r.slots.filter(s=>!s.member).length+' open roles':(own?own.role+' · ':'')+r.phase;
   let body='';
   if(r.phase==='Recruiting'){
-    body+='<small>'+esc(r.level==null?'Level unverified':r.level<=2?'No CPR or weight requirement':'Minimum 60 CPR · maximum 7% weight')+'</small>';
-    body+=r.slots.filter(s=>!s.member).map(s=>{
-      const known=Number.isFinite(s.profileCPR)&&Number.isFinite(s.weight);
-      const state=r.level==null?'Verify in Torn':r.level<=2?'Eligible':!known?'Verify in Torn':s.profileCPR>=60&&s.weight<=7?'Eligible':'Outside requirements';
-      return row('<b>'+esc(s.role)+'</b><br><small>Your CPR · '+esc(s.profileCPR??'unverified')+'</small>',badge(state,state==='Eligible'?'':'warn'));
-    }).join('')||empty('No open roles in the latest snapshot.');
+    body+=r.slots.map(s=>{
+      const noMinimum=r.level===1||r.level===2||(r.level>=3 && Number.isFinite(s.weight) && s.weight<=7);
+      let state=s.member?'Filled':s.eligibility || 'Verify in Torn';
+      if(!s.member && state==='Verify in Torn' && r.level>=3 && s.weight>7)state='60 CPR required';
+      const cpr=s.member || noMinimum?'':'<br><small>Your CPR · '+esc(s.profileCPR??'unverified')+'</small>';
+      return row('<b>'+esc(s.role)+'</b><br><small>Weight · '+weightText(s.weight)+'</small>'+cpr,badge(state,state==='Eligible'||s.member?'':'warn'));
+    }).join('')||empty('No roles in the latest snapshot.');
     body+='<a class="link" href="https://www.torn.com/factions.php?step=your#/tab=crimes" target="_blank" rel="noopener noreferrer">Open recruiting in Torn</a>';
   }else{
     body+=row('Scheduled start',esc(tct(r.ready)));
@@ -187,7 +204,9 @@ function card(r,opened=false){
     if(r.phase==='History'||delayed(r))body+=timing(r);
     body+=roster(r);
   }
-  return '<details class="card"'+(opened?' open':'')+'><summary><span class="level">LV<strong>'+esc(r.level??'–')+'</strong></span><span><b>'+esc(r.name)+'</b><span class="sub">#'+esc(r.id)+' · '+esc(detail)+'</span></span></summary><div class="inner">'+body+'</div></details>';
+  const requirements=r.level===1||r.level===2?'No requirements':r.level>=3?'60 CPR minimum unless role weight is 7% or less':'Level unverified';
+  body='<p class="kicker">'+requirements+'</p>'+body;
+  return '<details class="card"'+(opened?' open':'')+'><summary><span class="level">LV<strong>'+esc(r.level??'–')+'</strong></span><span><b>'+esc(r.name)+'</b><span class="sub">#'+esc(r.id)+' · '+esc(detail)+'</span><span class="sub">'+weightSummary(r,own)+'</span></span></summary><div class="inner">'+body+'</div></details>';
 }
 function draw(){
   if(!data){showGate();return;}
@@ -220,7 +239,7 @@ function draw(){
   if(tab==='Manage staff') staffPanel='<div class="panel stack"><h2>Manage staff</h2><label for="member-search">Search faction roster</label><input class="search" id="member-search" placeholder="Name or Torn ID"><div id="roster-list"></div></div>';
   const headingText=staff?'Staff panel':'My Profile';
   const side=historic?'<div class="eyebrow">History</div><h2>Delay records</h2><p class="desc">Open a crime to see the roster, each recorded cause, and time awaiting execution.</p>':
-    '<div class="eyebrow">Faction policy</div><h2>Entry requirements</h2>'+row('Levels 1–2','Unrestricted')+row('Level 3+ CPR','60 minimum')+row('Level 3+ weight','7% maximum');
+    '<div class="eyebrow">Faction policy</div><h2>Entry requirements</h2>'+row('Levels 1–2','No requirements')+row('Level 3+ · weight ≤ 7%','No CPR minimum')+row('Level 3+ · weight > 7%','60 CPR minimum');
   app.innerHTML='<div class="screen"><div class="hero line"><div><div class="eyebrow">Faction operations</div><h1>'+headingText+'</h1></div><div class="person"><span class="avatar">'+esc(m.name.slice(0,1))+'</span><span><b>'+esc(m.name)+'</b><br><small>'+esc(m.owner?'Owner':m.staff?'Staff':'Member')+' · #'+esc(m.id)+'</small></span></div></div>'+
     deviceSetting(data.rememberDevice)+panels+'<nav class="tabs" aria-label="Profile tabs">'+tabs.map(t=>btn(t,'tab',t,t===tab?'sel':'')).join('')+'</nav>'+
     '<p id="feedback" class="error" role="alert" hidden></p>'+(staffPanel||'<div class="grid"><section class="stack"><div><h2>'+esc(heading)+'</h2>'+(chooser?'<div class="pills">'+chooser+'</div>':'')+'</div>'+

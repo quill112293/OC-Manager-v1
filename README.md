@@ -24,7 +24,7 @@ If the tracker secret is missing, members can still sign in and view saved recor
 
 Scheduled-to-executed delay is divided into per-member intervals, observed time awaiting execution and unverified time. Overlapping recorded events keep their first blocker until that blocker clears. Simultaneous causes with no established first blocker stay open for review. Snapshot intervals are estimates. The manager never attributes gaps in observations to a player.
 
-Levels 1 and 2 have unrestricted CPR and weight. For higher levels the faction uses at least 60 CPR and at most 7% weight. In the live recruiting view an opening without verified member-specific values says **Verify in Torn**. The join link opens Torn’s OC page; the user selects the role in Torn. Armoury transfers, reimbursements, alerts and penalty actions are deferred.
+Levels 1–2 have no entry requirements. For level 3 and up, a role qualifies with at least 60 CPR or a role weight of 7% or less. Recruiting, active and historical OCs display per-role influence estimates from the bundled [Torn Probability role-weight dataset](https://tornprobability.com:3000/api/GetRoleWeights). Unknown or ambiguous roles are marked unknown. Eligibility comparisons use the underlying percentages before display rounding. The join link opens Torn’s OC page; the user selects the role in Torn. Armoury transfers, reimbursements, alerts and penalty actions are deferred.
 
 ## Development
 

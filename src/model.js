@@ -1,3 +1,4 @@
+import {roleWeight} from './role-weights.js';
 const finished = new Set(['Successful', 'Failure', 'Failed', 'Expired', 'Cancelled']);
 export function phase(r, at) {
   if (finished.has(r.status)) return 'History';
@@ -30,14 +31,24 @@ export function timeline(r) {
   return spans;
 }
 export function eligibility(level, cpr, weight) {
-  if (Number.isInteger(level) && level>=1 && level<=2) return 'Eligible';
-  if (!Number.isInteger(level) || level<1 || !Number.isFinite(cpr) || !Number.isFinite(weight)) return 'Verify in Torn';
-  return cpr>=60 && weight<=7 ? 'Eligible' : 'Outside requirements';
+  if (!Number.isInteger(level) || level<1) return 'Verify in Torn';
+  if (level<=2) return 'Eligible';
+  const hasCPR=Number.isFinite(cpr) && cpr>=0 && cpr<=100;
+  const hasWeight=Number.isFinite(weight) && weight>=0 && weight<=100;
+  if ((hasCPR && cpr>=60) || (hasWeight && weight<=7)) return 'Eligible';
+  return hasCPR && hasWeight ? 'Outside requirements' : 'Verify in Torn';
 }
 export function present(r) {
+  const slots=(r.slots || []).map(slot=>{
+    const weight=roleWeight(r.name,slot.role) ?? slot.weight ?? null;
+    return {...slot,weight,eligibility:eligibility(r.level,slot.profileCPR,weight)};
+  });
+  const participants=(r.participants || []).map(person=>({
+    ...person,weight:slots.find(slot=>slot.member===person.id && slot.role===person.role)?.weight ?? roleWeight(r.name,person.role)
+  }));
   return {id:r.id,name:r.name,level:r.level??null,phase:phase(r,r.last),status:r.status,
-    ready:r.ready,executed:r.executed,updated:r.last,participants:r.participants||[],
-    slots:r.slots||[],spans:timeline(r),pauses:r.planningPauses||[],
+    ready:r.ready,executed:r.executed,updated:r.last,participants,
+    slots,spans:timeline(r),pauses:r.planningPauses||[],
     events:Object.entries(r.blocks||{}).flatMap(([,b])=>b.runs.map(s=>({at:s.start,label:b.name+' observed · '+s.reason}))).sort((a,b)=>a.at-b.at),
     blockers:Object.entries(r.blocks||{}).map(([id,b])=>({id:Number(id),name:b.name,reasons:[...new Set(b.runs.map(x=>x.reason))]}))};
 }
